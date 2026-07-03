@@ -1,0 +1,8 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "types": ["node"],
+        "allowJs": true
+    },
+    "include": ["vite.config.ts", "react-router.config.ts", "eslint.config.js", "src/**/*.ts", "src/**/*.tsx"]
+}

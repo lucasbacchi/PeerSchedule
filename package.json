@@ -1,0 +1,49 @@
+{
+    "name": "peerschedule",
+    "version": "0.0.1",
+    "description": "A peer to peer scheduling application for Wentworth Institute of Technology students.",
+    "scripts": {
+        "build": "react-router build",
+        "dev": "react-router dev --host 0.0.0.0",
+        "typecheck": "react-router typegen && tsc",
+        "lint": "eslint .",
+        "format": "prettier --write .",
+        "check": "prettier --check ."
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "module",
+    "dependencies": {
+        "@react-router/node": "^8.1.0",
+        "@react-router/serve": "^8.1.0",
+        "@tailwindcss/vite": "^4.3.2",
+        "firebase": "^12.15.0",
+        "isbot": "^5.1.44",
+        "react": "^19.2.7",
+        "react-dom": "^19.2.7",
+        "react-router": "^8.1.0",
+        "tailwindcss": "^4.3.2"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.0.1",
+        "@react-router/dev": "^8.1.0",
+        "@types/react": "^19.2.17",
+        "@types/react-dom": "^19.2.3",
+        "@types/react-router-dom": "^5.3.3",
+        "eslint": "^9.7.0",
+        "eslint-config-prettier": "^10.1.8",
+        "eslint-plugin-jsx-a11y": "^6.10.2",
+        "eslint-plugin-react": "^7.37.5",
+        "eslint-plugin-react-hooks": "^7.1.1",
+        "eslint-plugin-react-refresh": "^0.5.3",
+        "globals": "^17.7.0",
+        "typescript-eslint": "^8.62.1",
+        "vite": "^8.1.3"
+    },
+    "allowScripts": {
+        "esbuild@0.28.1": true,
+        "@firebase/util@1.15.1": true,
+        "protobufjs@7.6.4": true
+    }
+}
