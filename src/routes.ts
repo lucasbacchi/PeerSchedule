@@ -5,21 +5,11 @@ import {
 } from "@react-router/dev/routes";
 
 export default [
-    // Main login/landing page: /
     index("./pages/HomePage.tsx"),
-
-    // Choose or create a calendar: /calendars
-    route("calendars", "./pages/ChooseCalendarPage.tsx"),
-
-    // View and manage one calendar: /calendars/abc123
-    route("calendars/:calendarId", "./pages/CalendarPage.tsx"),
-
-    // Account management: /account
+    route("main", "./pages/MainPage.tsx"),
+    route("choose", "./pages/ChoosePage.tsx"),
+    route("calendar", "./pages/CalendarPage.tsx"),
     route("account", "./pages/AccountPage.tsx"),
-
-    // Friend management: /friends
-    route("friends", "./pages/FriendManagementPage.tsx"),
-
-    // Any URL that does not match the routes above
-    route("*", "./catchall.tsx"),
+    route("friends", "./pages/FriendsPage.tsx"),
+    route("*?", "catchall.tsx"),
 ] satisfies RouteConfig;
