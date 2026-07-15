@@ -5,11 +5,24 @@ import {
 } from "@react-router/dev/routes";
 
 export default [
+    // Main landing page: /
     index("./pages/HomePage.tsx"),
-    route("main", "./pages/MainPage.tsx"),
-    route("choose", "./pages/ChoosePage.tsx"),
-    route("calendar", "./pages/CalendarPage.tsx"),
+
+    // Choose or create a calendar: /calendars
+    route("calendars", "./pages/ChooseCalendarPage.tsx"),
+
+    // View a particular calendar: /calendars/:calendarId
+    route(
+        "calendars/:calendarId",
+        "./pages/CalendarPage.tsx",
+    ),
+
+    // Account management: /account
     route("account", "./pages/AccountPage.tsx"),
+
+    // Friend list: /friends
     route("friends", "./pages/FriendsPage.tsx"),
-    route("*?", "catchall.tsx"),
+
+    // Any invalid URL
+    route("*", "./catchall.tsx"),
 ] satisfies RouteConfig;
