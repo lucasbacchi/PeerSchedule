@@ -23,7 +23,7 @@ export type EventType = "meeting" | "open_event" | "blocked_time";
 export type Visibility = "full_details" | "friends_only" | "busy_only";
 export type ParticipantStatus = "accepted" | "pending" | "declined";
 
-export interface Event {
+export interface CalendarEvent  {
     id: string;
     title: string;
     description: string;
