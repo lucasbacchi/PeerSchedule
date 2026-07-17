@@ -1,5 +1,15 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import {
+    Links,
+    Meta,
+    Outlet,
+    Scripts,
+    ScrollRestoration,
+    useLocation,
+} from "react-router";
+
 import type { Route } from "./+types/root";
+import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
 import favicon from "./public/img/favicon.ico";
 
 import "./index.css";
@@ -33,7 +43,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function Root() {
-    return <Outlet />;
+    const location = useLocation();
+    const showNavbar = location.pathname !== "/";
+
+    return (
+        <>
+            {showNavbar ? <Navbar /> : null}
+            <Outlet />
+            <Footer />
+        </>
+    );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {

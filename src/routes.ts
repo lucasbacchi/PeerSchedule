@@ -1,11 +1,31 @@
-import { type RouteConfig, index, route } from "@react-router/dev/routes";
+import {
+    type RouteConfig,
+    index,
+    route,
+} from "@react-router/dev/routes";
 
 export default [
-    index("./pages/HomePage.tsx"),
-    route("main", "./pages/MainPage.tsx"),
-    route("choose", "./pages/ChoosePage.tsx"),
-    route("calendar", "./pages/CalendarPage.tsx"),
+    // Main landing page: /
+    index("./pages/LandingPage.tsx"),
+
+    // App home page after login: /home
+    route("home", "./pages/HomePage.tsx"),
+
+    // Choose or create a calendar: /calendars
+    route("calendars", "./pages/ChoosePage.tsx"),
+
+    // View a particular calendar: /calendars/:calendarId
+    route(
+        "calendars/:calendarId",
+        "./pages/CalendarPage.tsx",
+    ),
+
+    // Account management: /account
     route("account", "./pages/AccountPage.tsx"),
+
+    // Friend list: /friends
     route("friends", "./pages/FriendsPage.tsx"),
-    route("*?", "catchall.tsx"),
+
+    // Any invalid URL
+    route("*", "./catchall.tsx"),
 ] satisfies RouteConfig;
