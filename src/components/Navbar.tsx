@@ -41,10 +41,10 @@ function Navbar() {
         </NavLink>
         <button
           type="button"
-          className="flex items-center justify-center w-8 h-8 text-[#1d1b20] hover:text-[#2563eb] transition-colors cursor-pointer"
+          className="flex items-center justify-center w-8 h-8 text-[#1d1b20] hover:text-[#2563eb] transition-colors cursor-pointer group"
           aria-label="Notifications"
         >
-          <svg viewBox="0 0 16 20" className="w-5 h-5" fill="currentColor">
+          <svg viewBox="0 0 16 20" className="w-5 h-5 fill-current transition-colors" aria-hidden="true">
             <path d={navSvgPaths.p15aa46c0} />
           </svg>
         </button>
