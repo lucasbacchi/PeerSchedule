@@ -4,5 +4,5 @@ export default function MainPage() {
             <title>Friends | PeerSchedule</title>
             <h1 className="text-3xl font-bold">Friends Page</h1>
         </div>
-    )
+    );
 }

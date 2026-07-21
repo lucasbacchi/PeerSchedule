@@ -4,5 +4,5 @@ export default function MainPage() {
             <title>Account | PeerSchedule</title>
             <h1 className="text-3xl font-bold">Account Page</h1>
         </div>
-    )
+    );
 }

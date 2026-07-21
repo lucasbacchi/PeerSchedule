@@ -1,13 +1,4 @@
-import {
-    Timestamp,
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    where,
-} from "firebase/firestore";
+import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
 import type { Group } from "@/types/database";
@@ -20,15 +11,10 @@ const GROUPS_COLLECTION = "groups";
  * The owner is also placed in memberIds when a calendar is created,
  * so this returns both owned and shared calendars.
  */
-export const getUserCalendars = async (
-    uid: string,
-): Promise<Group[]> => {
+export const getUserCalendars = async (uid: string): Promise<Group[]> => {
     const groupsRef = collection(db, GROUPS_COLLECTION);
 
-    const groupsQuery = query(
-        groupsRef,
-        where("memberIds", "array-contains", uid),
-    );
+    const groupsQuery = query(groupsRef, where("memberIds", "array-contains", uid));
 
     const snapshot = await getDocs(groupsQuery);
 
@@ -41,10 +27,7 @@ export const getUserCalendars = async (
 /**
  * Creates a new calendar/group and returns the completed Group object.
  */
-export const createCalendar = async (
-    name: string,
-    ownerId: string,
-): Promise<Group> => {
+export const createCalendar = async (name: string, ownerId: string): Promise<Group> => {
     const trimmedName = name.trim();
 
     if (trimmedName.length === 0) {
@@ -58,10 +41,7 @@ export const createCalendar = async (
         createdAt: Timestamp.now(),
     };
 
-    const documentReference = await addDoc(
-        collection(db, GROUPS_COLLECTION),
-        newCalendar,
-    );
+    const documentReference = await addDoc(collection(db, GROUPS_COLLECTION), newCalendar);
 
     return {
         id: documentReference.id,
@@ -72,14 +52,8 @@ export const createCalendar = async (
 /**
  * Gets one calendar using its Firestore document ID.
  */
-export const getCalendarById = async (
-    calendarId: string,
-): Promise<Group | null> => {
-    const calendarReference = doc(
-        db,
-        GROUPS_COLLECTION,
-        calendarId,
-    );
+export const getCalendarById = async (calendarId: string): Promise<Group | null> => {
+    const calendarReference = doc(db, GROUPS_COLLECTION, calendarId);
 
     const snapshot = await getDoc(calendarReference);
 

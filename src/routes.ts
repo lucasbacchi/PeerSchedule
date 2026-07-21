@@ -1,8 +1,4 @@
-import {
-    type RouteConfig,
-    index,
-    route,
-} from "@react-router/dev/routes";
+import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
     // Main landing page: /
@@ -12,10 +8,7 @@ export default [
     route("calendars", "./pages/ChooseCalendarPage.tsx"),
 
     // View a particular calendar: /calendars/:calendarId
-    route(
-        "calendars/:calendarId",
-        "./pages/CalendarPage.tsx",
-    ),
+    route("calendars/:calendarId", "./pages/CalendarPage.tsx"),
 
     // Account management: /account
     route("account", "./pages/AccountPage.tsx"),

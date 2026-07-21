@@ -1,37 +1,25 @@
-import {
-    type SubmitEventHandler,
-    useEffect,
-    useState,
-} from "react";
+import { type SubmitEventHandler, useEffect, useState } from "react";
 
-import {
-    Link,
-    useNavigate,
-} from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { onAuthStateChanged } from "firebase/auth";
 
 import { auth } from "@/lib/firebase";
 import type { Group } from "@/types/database";
-import {
-    createCalendar,
-    getUserCalendars,
-} from "@/services/calendarService";
+import { createCalendar, getUserCalendars } from "@/services/calendarService";
 
 export default function ChooseCalendarPage() {
     const navigate = useNavigate();
 
     const [calendars, setCalendars] = useState<Group[]>([]);
-    const [currentUserId, setCurrentUserId] =
-        useState<string | null>(null);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
     const [isLoading, setIsLoading] = useState(true);
     const [isCreating, setIsCreating] = useState(false);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
 
     const [calendarName, setCalendarName] = useState("");
-    const [errorMessage, setErrorMessage] =
-        useState<string | null>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -55,17 +43,12 @@ export default function ChooseCalendarPage() {
                     setCalendars(userCalendars);
                 })
                 .catch((error: unknown) => {
-                    console.error(
-                        "Failed to load calendars:",
-                        error,
-                    );
+                    console.error("Failed to load calendars:", error);
 
                     if (error instanceof Error) {
                         setErrorMessage(error.message);
                     } else {
-                        setErrorMessage(
-                            "Unable to load your calendars.",
-                        );
+                        setErrorMessage("Unable to load your calendars.");
                     }
                 })
                 .finally(() => {
@@ -76,61 +59,43 @@ export default function ChooseCalendarPage() {
         return unsubscribe;
     }, [navigate]);
 
-    const performCreateCalendar =
-        async (): Promise<void> => {
-            if (!currentUserId) {
-                setErrorMessage(
-                    "You must be signed in to create a calendar.",
-                );
-                return;
+    const performCreateCalendar = async (): Promise<void> => {
+        if (!currentUserId) {
+            setErrorMessage("You must be signed in to create a calendar.");
+            return;
+        }
+
+        const trimmedName = calendarName.trim();
+
+        if (trimmedName.length === 0) {
+            setErrorMessage("Please enter a calendar name.");
+            return;
+        }
+
+        try {
+            setIsCreating(true);
+            setErrorMessage(null);
+
+            const newCalendar = await createCalendar(trimmedName, currentUserId);
+
+            setCalendars((currentCalendars) => [...currentCalendars, newCalendar]);
+
+            setCalendarName("");
+            setIsCreateOpen(false);
+        } catch (error: unknown) {
+            console.error("Failed to create calendar:", error);
+
+            if (error instanceof Error) {
+                setErrorMessage(error.message);
+            } else {
+                setErrorMessage("Unable to create the calendar.");
             }
+        } finally {
+            setIsCreating(false);
+        }
+    };
 
-            const trimmedName = calendarName.trim();
-
-            if (trimmedName.length === 0) {
-                setErrorMessage(
-                    "Please enter a calendar name.",
-                );
-                return;
-            }
-
-            try {
-                setIsCreating(true);
-                setErrorMessage(null);
-
-                const newCalendar = await createCalendar(
-                    trimmedName,
-                    currentUserId,
-                );
-
-                setCalendars((currentCalendars) => [
-                    ...currentCalendars,
-                    newCalendar,
-                ]);
-
-                setCalendarName("");
-                setIsCreateOpen(false);
-            } catch (error: unknown) {
-                console.error(
-                    "Failed to create calendar:",
-                    error,
-                );
-
-                if (error instanceof Error) {
-                    setErrorMessage(error.message);
-                } else {
-                    setErrorMessage(
-                        "Unable to create the calendar.",
-                    );
-                }
-            } finally {
-                setIsCreating(false);
-            }
-        };
-
-    const handleCreateCalendar: SubmitEventHandler<HTMLFormElement> = (
-        event,
-    ) => {
+    const handleCreateCalendar: SubmitEventHandler<HTMLFormElement> = (event) => {
         event.preventDefault();
         void performCreateCalendar();
     };
@@ -156,9 +121,7 @@ export default function ChooseCalendarPage() {
             <main className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
                 <title>Calendars | PeerSchedule</title>
 
-                <p className="text-lg text-gray-600 dark:text-gray-300">
-                    Loading your calendars...
-                </p>
+                <p className="text-lg text-gray-600 dark:text-gray-300">Loading your calendars...</p>
             </main>
         );
     }
@@ -170,13 +133,10 @@ export default function ChooseCalendarPage() {
             <div className="mx-auto max-w-6xl px-4 py-8">
                 <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                            Choose a Calendar
-                        </h1>
+                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Choose a Calendar</h1>
 
                         <p className="mt-2 text-gray-600 dark:text-gray-400">
-                            Open one of your calendars or create a
-                            new shared calendar.
+                            Open one of your calendars or create a new shared calendar.
                         </p>
                     </div>
 
@@ -201,9 +161,7 @@ export default function ChooseCalendarPage() {
                 {calendars.length > 0 ? (
                     <section className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                         {calendars.map((calendar) => {
-                            const isOwner =
-                                calendar.ownerId ===
-                                currentUserId;
+                            const isOwner = calendar.ownerId === currentUserId;
 
                             return (
                                 <article
@@ -222,18 +180,13 @@ export default function ChooseCalendarPage() {
                                                     : "rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300"
                                             }
                                         >
-                                            {isOwner
-                                                ? "Owner"
-                                                : "Member"}
+                                            {isOwner ? "Owner" : "Member"}
                                         </span>
                                     </div>
 
                                     <p className="mt-4 flex-1 text-gray-600 dark:text-gray-400">
                                         {calendar.memberIds.length}{" "}
-                                        {calendar.memberIds.length ===
-                                        1
-                                            ? "member"
-                                            : "members"}
+                                        {calendar.memberIds.length === 1 ? "member" : "members"}
                                     </p>
 
                                     <Link
@@ -253,8 +206,7 @@ export default function ChooseCalendarPage() {
                         </h2>
 
                         <p className="mt-2 text-gray-600 dark:text-gray-400">
-                            Create your first calendar to begin
-                            scheduling events.
+                            Create your first calendar to begin scheduling events.
                         </p>
 
                         <button
@@ -272,9 +224,7 @@ export default function ChooseCalendarPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
                     <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                                Create Calendar
-                            </h2>
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Create Calendar</h2>
 
                             <button
                                 type="button"
@@ -287,10 +237,7 @@ export default function ChooseCalendarPage() {
                             </button>
                         </div>
 
-                        <form
-                            onSubmit={handleCreateCalendar}
-                            className="mt-6 space-y-5"
-                        >
+                        <form onSubmit={handleCreateCalendar} className="mt-6 space-y-5">
                             <div>
                                 <label
                                     htmlFor="calendar-name"
@@ -304,9 +251,7 @@ export default function ChooseCalendarPage() {
                                     type="text"
                                     value={calendarName}
                                     onChange={(event) => {
-                                        setCalendarName(
-                                            event.target.value,
-                                        );
+                                        setCalendarName(event.target.value);
                                     }}
                                     required
                                     disabled={isCreating}
@@ -316,10 +261,7 @@ export default function ChooseCalendarPage() {
                             </div>
 
                             {errorMessage !== null ? (
-                                <p
-                                    role="alert"
-                                    className="text-sm text-red-600 dark:text-red-400"
-                                >
+                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                                     {errorMessage}
                                 </p>
                             ) : null}
@@ -339,9 +281,7 @@ export default function ChooseCalendarPage() {
                                     disabled={isCreating}
                                     className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                    {isCreating
-                                        ? "Creating..."
-                                        : "Create"}
+                                    {isCreating ? "Creating..." : "Create"}
                                 </button>
                             </div>
                         </form>
