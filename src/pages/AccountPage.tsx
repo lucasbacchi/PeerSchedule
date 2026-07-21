@@ -17,7 +17,7 @@ export default function AccountPage() {
     }
 
     return (
-        <div className="min-h-screen bg-white flex flex-col font-['Inter',sans-serif]">
+        <div className="bg-[#F8FAFC] flex flex-col font-['Inter',sans-serif]">
             <main className="flex-1 px-10 pt-6 pb-8">
                 {/* Page Title */}
                 <h1 className="text-[32px] font-bold text-[#0f172a] tracking-tight mb-5">

@@ -121,7 +121,7 @@ export default function FriendsPage() {
 
 
   return (
-    <div className="bg-white min-h-screen flex flex-col font-['Inter',sans-serif]">
+    <div className="bg-[#F8FAFC] min-h-screen flex flex-col font-['Inter',sans-serif]">
       <main className="flex-1 px-16 pt-10 pb-16">
         <h1 className="text-[32px] font-bold text-[#0f172a] tracking-tight mb-5">
             Friend Management

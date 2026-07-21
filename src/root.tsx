@@ -49,7 +49,11 @@ export default function Root() {
     return (
         <>
             {showNavbar ? <Navbar /> : null}
-            <Outlet />
+
+            <div className="flex-1 bg-[#F8FAFC]">
+                <Outlet />
+            </div>
+
             <Footer />
         </>
     );
