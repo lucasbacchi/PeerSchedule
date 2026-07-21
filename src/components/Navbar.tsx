@@ -1,11 +1,7 @@
 import { NavLink } from "react-router";
 
 import logo from "@/public/img/TempLogo.png";
-
-const navSvgPaths = {
-  p15aa46c0:
-    "M7.5 0C4.186 0 1.5 2.686 1.5 6v4.5L0 12v1.5h15V12l-1.5-1.5V6C13.5 2.686 10.814 0 7.5 0zm0 18a2.25 2.25 0 0 0 2.25-2.25h-4.5A2.25 2.25 0 0 0 7.5 18z",
-};
+import svgPaths from "@/imports/svg-l5xzino1q2";
 
 function Logo() {
   return <img src={logo} alt="PeerSchedule" className="h-10 w-auto" />;
@@ -44,8 +40,8 @@ function Navbar() {
           className="flex items-center justify-center w-8 h-8 text-[#1d1b20] hover:text-[#2563eb] transition-colors cursor-pointer group"
           aria-label="Notifications"
         >
-          <svg viewBox="0 0 16 20" className="w-5 h-5 fill-current transition-colors" aria-hidden="true">
-            <path d={navSvgPaths.p15aa46c0} />
+          <svg viewBox="0 0 21.3333 26.6667" className="w-5 h-5 fill-current transition-colors" aria-hidden="true">
+            <path d={svgPaths.p199db900} />
           </svg>
         </button>
         <NavLink
