@@ -26,15 +26,6 @@ const INITIAL_FRIENDS: Friend[] = [
   { id: 11, name: 'Jamie Wilson', calendars: 'Family', email: 'jamie.w@email.com', status: 'accept' },
 ]
 
-function Logo() {
-  return (
-    <span className="text-3xl font-bold tracking-tight select-none">
-      <span className="text-[#0f172a]">Lost</span>
-      <span className="text-[#EC221F]">|Found</span>
-    </span>
-  )
-}
-
 function TrashIcon() {
   return (
     <svg fill="none" viewBox="0 0 40 44" className="w-6 h-6">
@@ -128,18 +119,12 @@ export default function FriendsPage() {
     return matchSearch && matchFilter
   })
 
-  const socialIconPaths = [
-    svgPaths.p132b8500,
-    svgPaths.p3a800a00,
-    svgPaths.p3b619c00,
-    svgPaths.p1f140b00,
-  ] as string[]
 
   return (
     <div className="bg-white min-h-screen flex flex-col font-['Inter',sans-serif]">
       <main className="flex-1 px-16 pt-10 pb-16">
-        <h1 className="font-bold text-[#0f172a] text-5xl tracking-tight mb-8">
-          Friend Management
+        <h1 className="text-[32px] font-bold text-[#0f172a] tracking-tight mb-5">
+            Friend Management
         </h1>
 
         <div className="bg-white rounded-3xl shadow-md border border-[#e2e8f0] p-6">
@@ -230,37 +215,6 @@ export default function FriendsPage() {
           </div>
         </div>
       </main>
-
-      <footer className="border-t-2 border-[#e2e8f0] bg-white h-[220px] flex items-center px-16 gap-16">
-        <div className="shrink-0">
-          <Logo />
-          <div className="flex gap-3 mt-5">
-            {socialIconPaths.map((path) => (
-              <div key={path} className="size-9 flex items-center justify-center rounded cursor-pointer hover:opacity-70 transition-opacity">
-                <svg fill="none" viewBox="0 0 24 24" className="size-6">
-                  <path d={path} fill="#828282" />
-                </svg>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="flex-1 text-[14px] font-medium text-[#64748b] max-w-xs">
-          Disclaimer this is not a real website, all contact info and social media buttons are fake, and just for show.
-        </div>
-        <div className="ml-auto flex gap-20">
-          <div className="flex flex-col gap-4">
-            <span className="text-[15px] font-medium text-black">Contact</span>
-            <span className="text-[14px] text-[#64748b]">random@cal.com</span>
-            <span className="text-[14px] text-[#64748b]">(978)-123-1234</span>
-          </div>
-          <div className="flex flex-col gap-4">
-            <span className="text-[15px] font-medium text-[#0f172a]">Pages</span>
-            <span className="text-[14px] text-[#64748b] cursor-pointer hover:underline">Account</span>
-            <span className="text-[14px] text-[#64748b] cursor-pointer hover:underline">Friends</span>
-            <span className="text-[14px] text-[#64748b] cursor-pointer hover:underline">Page</span>
-          </div>
-        </div>
-      </footer>
     </div>
   )
 }

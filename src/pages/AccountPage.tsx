@@ -1,6 +1,4 @@
 import { useState } from "react";
-import svgPaths from "@/imports/LandingPage/svg-4b7h86uepq";
-import imgLogo from "@/public/img/TempLogo.png";
 
 export default function AccountPage() {
     const [name, setName] = useState("");
@@ -20,27 +18,6 @@ export default function AccountPage() {
 
     return (
         <div className="min-h-screen bg-white flex flex-col font-['Inter',sans-serif]">
-            {/* Navigation */}
-            <header className="border-b-2 border-[#e2e8f0] bg-white h-14 flex items-center px-6 shrink-0">
-                <div className="flex items-center flex-1">
-                    <img src={imgLogo} alt="Logo" className="h-8 object-contain" />
-                </div>
-                <nav className="flex items-center gap-6">
-                    <button type="button" className="text-sm font-medium text-black hover:text-[#2563eb] transition-colors">Home</button>
-                    <button type="button" className="text-sm font-medium text-black hover:text-[#2563eb] transition-colors">Friends</button>
-                    <button type="button" className="text-sm font-medium text-[#0f172a] hover:text-[#2563eb] transition-colors">Account</button>
-                    <button className="text-[#1D1B20] hover:text-[#2563eb] transition-colors" aria-label="Notifications">
-                        <svg className="w-5 h-5" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true">
-                            <path d="M7.5 0C4.186 0 1.5 2.686 1.5 6v4.5L0 12v1.5h15V12l-1.5-1.5V6C13.5 2.686 10.814 0 7.5 0zm0 18a2.25 2.25 0 0 0 2.25-2.25h-4.5A2.25 2.25 0 0 0 7.5 18z" />
-                        </svg>
-                    </button>
-                    <button className="bg-[#2563eb] text-white text-sm font-medium px-4 py-1.5 rounded-lg shadow-sm hover:bg-blue-700 active:bg-blue-800 transition-colors whitespace-nowrap">
-                        Create Calendar
-                    </button>
-                </nav>
-            </header>
-
-            {/* Main Content */}
             <main className="flex-1 px-10 pt-6 pb-8">
                 {/* Page Title */}
                 <h1 className="text-[32px] font-bold text-[#0f172a] tracking-tight mb-5">
@@ -145,48 +122,6 @@ export default function AccountPage() {
                     </button>
                 </div>
             </main>
-
-            {/* Footer */}
-            <footer className="border-t-2 border-[#e2e8f0] bg-white py-5 px-10">
-                <div className="flex items-start gap-12 flex-wrap">
-                    {/* Logo + disclaimer */}
-                    <div className="flex flex-col gap-3 flex-1 min-w-[200px]">
-                        <img src={imgLogo} alt="Logo" className="h-8 object-contain object-left" />
-                        <p className="text-xs font-medium text-[#0f172a] max-w-xs leading-relaxed">
-                            Disclaimer this is not a real website, all contact info and social media buttons are fake, and just for show.
-                        </p>
-                        <div className="flex items-center gap-1">
-                            <button className="p-1.5 rounded hover:bg-gray-100 transition-colors" aria-label="Facebook">
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24"><path d={svgPaths.p132b8500} fill="#828282" /></svg>
-                            </button>
-                            <button className="p-1.5 rounded hover:bg-gray-100 transition-colors" aria-label="LinkedIn">
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24"><path d={svgPaths.p3a800a00} fill="#828282" /></svg>
-                            </button>
-                            <button className="p-1.5 rounded hover:bg-gray-100 transition-colors" aria-label="YouTube">
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24"><path d={svgPaths.p3b619c00} fill="#828282" /></svg>
-                            </button>
-                            <button className="p-1.5 rounded hover:bg-gray-100 transition-colors" aria-label="Instagram">
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24"><path d={svgPaths.p1f140b00} fill="#828282" /></svg>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Contact */}
-                    <div className="flex flex-col gap-2 text-right">
-                        <p className="text-sm font-medium text-black">Contact</p>
-                        <p className="text-xs text-[#64748b]">random@cal.com</p>
-                        <p className="text-xs text-[#64748b]">(978)-123-1234</p>
-                    </div>
-
-                    {/* Pages */}
-                    <div className="flex flex-col gap-2 text-right">
-                        <p className="text-sm font-medium text-[#0f172a]">Pages</p>
-                        <p className="text-xs text-[#64748b]">Account</p>
-                        <p className="text-xs text-[#64748b]">Friends</p>
-                        <p className="text-xs text-[#64748b]">Page</p>
-                    </div>
-                </div>
-            </footer>
 
             {/* Delete Confirm Modal */}
             {showDeleteConfirm ? (
