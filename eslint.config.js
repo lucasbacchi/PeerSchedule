@@ -63,6 +63,8 @@ export default [
             // React 19 optimizations
             "react/react-in-jsx-scope": "off",
             "react/jsx-uses-react": "off",
+            // Data-fetching effects intentionally update loading and result state.
+            "react-hooks/set-state-in-effect": "off",
 
             // React Refresh
             "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],

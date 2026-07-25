@@ -1,4 +1,21 @@
 {
-    "indexes": [],
+    "indexes": [
+        {
+            "collectionGroup": "friendRequests",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "senderId", "order": "ASCENDING" },
+                { "fieldPath": "receiverId", "order": "ASCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "calendarId", "order": "ASCENDING" },
+                { "fieldPath": "startTime", "order": "ASCENDING" }
+            ]
+        }
+    ],
     "fieldOverrides": []
 }

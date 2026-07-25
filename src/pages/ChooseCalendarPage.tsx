@@ -1,293 +1,370 @@
-import { type SubmitEventHandler, useEffect, useState } from "react";
+import { type SubmitEventHandler, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 
-import { Link, useNavigate } from "react-router";
-
-import { onAuthStateChanged } from "firebase/auth";
-
-import { auth } from "@/lib/firebase";
+import Modal from "@/components/common/Modal";
+import PageState from "@/components/common/PageState";
+import { useRequireAuth } from "@/hooks/useAuth";
+import { createCalendar, deleteCalendar, getUserCalendars, updateCalendar } from "@/services/calendarService";
 import type { Group } from "@/types/database";
-import { createCalendar, getUserCalendars } from "@/services/calendarService";
+
+interface CalendarFormState {
+    name: string;
+    description: string;
+    color: string;
+}
+
+const emptyForm: CalendarFormState = {
+    name: "",
+    description: "",
+    color: "#2563eb",
+};
 
 export default function ChooseCalendarPage() {
-    const navigate = useNavigate();
-
+    const { user, isLoading: isAuthLoading } = useRequireAuth();
     const [calendars, setCalendars] = useState<Group[]>([]);
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
     const [isLoading, setIsLoading] = useState(true);
-    const [isCreating, setIsCreating] = useState(false);
-    const [isCreateOpen, setIsCreateOpen] = useState(false);
-
-    const [calendarName, setCalendarName] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [isFormOpen, setIsFormOpen] = useState(false);
+    const [editingCalendar, setEditingCalendar] = useState<Group | null>(null);
+    const [calendarToDelete, setCalendarToDelete] = useState<Group | null>(null);
+    const [form, setForm] = useState<CalendarFormState>(emptyForm);
 
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (!user) {
-                setCurrentUserId(null);
-                setIsLoading(false);
-
-                void navigate("/", {
-                    replace: true,
-                });
-
-                return;
-            }
-
-            setCurrentUserId(user.uid);
-            setIsLoading(true);
-            setErrorMessage(null);
-
-            getUserCalendars(user.uid)
-                .then((userCalendars) => {
-                    setCalendars(userCalendars);
-                })
-                .catch((error: unknown) => {
-                    console.error("Failed to load calendars:", error);
-
-                    if (error instanceof Error) {
-                        setErrorMessage(error.message);
-                    } else {
-                        setErrorMessage("Unable to load your calendars.");
-                    }
-                })
-                .finally(() => {
-                    setIsLoading(false);
-                });
-        });
-
-        return unsubscribe;
-    }, [navigate]);
-
-    const performCreateCalendar = async (): Promise<void> => {
-        if (!currentUserId) {
-            setErrorMessage("You must be signed in to create a calendar.");
-            return;
-        }
-
-        const trimmedName = calendarName.trim();
-
-        if (trimmedName.length === 0) {
-            setErrorMessage("Please enter a calendar name.");
-            return;
-        }
+    const loadCalendars = useCallback(async (): Promise<void> => {
+        if (!user) return;
 
         try {
-            setIsCreating(true);
+            setIsLoading(true);
             setErrorMessage(null);
-
-            const newCalendar = await createCalendar(trimmedName, currentUserId);
-
-            setCalendars((currentCalendars) => [...currentCalendars, newCalendar]);
-
-            setCalendarName("");
-            setIsCreateOpen(false);
+            setCalendars(await getUserCalendars(user.uid));
         } catch (error: unknown) {
-            console.error("Failed to create calendar:", error);
-
-            if (error instanceof Error) {
-                setErrorMessage(error.message);
-            } else {
-                setErrorMessage("Unable to create the calendar.");
-            }
+            console.error("Failed to load calendars:", error);
+            setErrorMessage(error instanceof Error ? error.message : "Unable to load your calendars.");
         } finally {
-            setIsCreating(false);
+            setIsLoading(false);
         }
+    }, [user]);
+
+    useEffect(() => {
+        void loadCalendars();
+    }, [loadCalendars]);
+
+    const openCreateForm = (): void => {
+        setEditingCalendar(null);
+        setForm(emptyForm);
+        setErrorMessage(null);
+        setIsFormOpen(true);
     };
 
-    const handleCreateCalendar: SubmitEventHandler<HTMLFormElement> = (event) => {
+    const openEditForm = (calendar: Group): void => {
+        setEditingCalendar(calendar);
+        setForm({
+            name: calendar.name,
+            description: calendar.description ?? "",
+            color: calendar.color ?? "#2563eb",
+        });
+        setErrorMessage(null);
+        setIsFormOpen(true);
+    };
+
+    const closeForm = (): void => {
+        if (isSaving) return;
+        setIsFormOpen(false);
+        setEditingCalendar(null);
+        setForm(emptyForm);
+        setErrorMessage(null);
+    };
+
+    const handleSubmit: SubmitEventHandler<HTMLFormElement> = (event) => {
         event.preventDefault();
-        void performCreateCalendar();
+        void (async () => {
+            if (!user) return;
+
+            try {
+                setIsSaving(true);
+                setErrorMessage(null);
+                setSuccessMessage(null);
+
+                if (editingCalendar) {
+                    await updateCalendar(editingCalendar.id, form);
+                    setSuccessMessage("Calendar updated successfully.");
+                } else {
+                    await createCalendar({ ...form, ownerId: user.uid });
+                    setSuccessMessage("Calendar created successfully.");
+                }
+
+                closeForm();
+                await loadCalendars();
+            } catch (error: unknown) {
+                console.error("Unable to save calendar:", error);
+                setErrorMessage(error instanceof Error ? error.message : "Unable to save the calendar.");
+            } finally {
+                setIsSaving(false);
+            }
+        })();
     };
 
-    const handleOpenCreateForm = (): void => {
-        setCalendarName("");
-        setErrorMessage(null);
-        setIsCreateOpen(true);
+    const handleDelete = (): void => {
+        if (!calendarToDelete) return;
+
+        void (async () => {
+            try {
+                setIsSaving(true);
+                setErrorMessage(null);
+                await deleteCalendar(calendarToDelete.id);
+                setCalendarToDelete(null);
+                setSuccessMessage("Calendar and its events were deleted.");
+                await loadCalendars();
+            } catch (error: unknown) {
+                console.error("Unable to delete calendar:", error);
+                setErrorMessage(error instanceof Error ? error.message : "Unable to delete the calendar.");
+            } finally {
+                setIsSaving(false);
+            }
+        })();
     };
 
-    const handleCloseCreateForm = (): void => {
-        if (isCreating) {
-            return;
-        }
-
-        setCalendarName("");
-        setErrorMessage(null);
-        setIsCreateOpen(false);
-    };
-
-    if (isLoading) {
-        return (
-            <main className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
-                <title>Calendars | PeerSchedule</title>
-
-                <p className="text-lg text-gray-600 dark:text-gray-300">Loading your calendars...</p>
-            </main>
-        );
+    if (isAuthLoading || (user && isLoading)) {
+        return <PageState title="Loading calendars" message="Getting your shared calendars ready..." />;
     }
 
+    if (!user) return null;
+
     return (
-        <main className="min-h-screen bg-gray-50 dark:bg-gray-950">
+        <main className="min-h-[calc(100vh-65px)] bg-slate-50">
             <title>Choose Calendar | PeerSchedule</title>
-
-            <div className="mx-auto max-w-6xl px-4 py-8">
-                <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+                <section className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Choose a Calendar</h1>
-
-                        <p className="mt-2 text-gray-600 dark:text-gray-400">
-                            Open one of your calendars or create a new shared calendar.
+                        <p className="text-sm font-bold uppercase tracking-wide text-blue-600">Your workspace</p>
+                        <h1 className="mt-1 text-3xl font-black text-slate-950 sm:text-4xl">Choose a calendar</h1>
+                        <p className="mt-3 max-w-2xl text-slate-600">
+                            Open a calendar shared with you, or create a new one for a team, class, club, or friend
+                            group.
                         </p>
                     </div>
-
                     <button
                         type="button"
-                        onClick={handleOpenCreateForm}
-                        className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+                        onClick={openCreateForm}
+                        className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white shadow-sm hover:bg-blue-700"
                     >
-                        Create Calendar
+                        + Create calendar
                     </button>
                 </section>
 
-                {errorMessage !== null && !isCreateOpen ? (
-                    <div
-                        role="alert"
-                        className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-                    >
+                {errorMessage && !isFormOpen ? (
+                    <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
                         {errorMessage}
                     </div>
                 ) : null}
+                {successMessage ? (
+                    <div
+                        role="status"
+                        className="mt-6 rounded-xl border border-green-200 bg-green-50 p-4 text-green-800"
+                    >
+                        {successMessage}
+                    </div>
+                ) : null}
 
-                {calendars.length > 0 ? (
-                    <section className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {calendars.length === 0 ? (
+                    <section className="mt-10 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center shadow-sm">
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-3xl text-blue-700">
+                            ⌘
+                        </div>
+                        <h2 className="mt-5 text-2xl font-bold text-slate-900">No calendars yet</h2>
+                        <p className="mx-auto mt-2 max-w-md text-slate-600">
+                            Create your first shared calendar to begin adding events and inviting members.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={openCreateForm}
+                            className="mt-6 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700"
+                        >
+                            Create your first calendar
+                        </button>
+                    </section>
+                ) : (
+                    <section className="mt-10 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
                         {calendars.map((calendar) => {
-                            const isOwner = calendar.ownerId === currentUserId;
-
+                            const isOwner = calendar.ownerId === user.uid;
                             return (
                                 <article
                                     key={calendar.id}
-                                    className="flex flex-col rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
+                                    className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
                                 >
-                                    <div className="flex items-start justify-between gap-4">
-                                        <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                                            {calendar.name}
-                                        </h2>
+                                    <div className="h-3" style={{ backgroundColor: calendar.color ?? "#2563eb" }} />
+                                    <div className="flex min-h-64 flex-col p-6">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <h2 className="text-xl font-bold text-slate-950">{calendar.name}</h2>
+                                                <p className="mt-2 line-clamp-3 text-sm text-slate-600">
+                                                    {calendar.description?.trim()
+                                                        ? calendar.description
+                                                        : "No description has been added."}
+                                                </p>
+                                            </div>
+                                            <span
+                                                className={`rounded-full px-3 py-1 text-xs font-bold ${isOwner ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"}`}
+                                            >
+                                                {isOwner ? "Owner" : "Member"}
+                                            </span>
+                                        </div>
 
-                                        <span
-                                            className={
-                                                isOwner
-                                                    ? "rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                                                    : "rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                                            }
-                                        >
-                                            {isOwner ? "Owner" : "Member"}
-                                        </span>
+                                        <div className="mt-6 flex flex-1 items-end justify-between text-sm text-slate-500">
+                                            <span>
+                                                {calendar.memberIds.length}{" "}
+                                                {calendar.memberIds.length === 1 ? "member" : "members"}
+                                            </span>
+                                            <span>Created {calendar.createdAt.toDate().toLocaleDateString()}</span>
+                                        </div>
+
+                                        <div className="mt-6 flex flex-wrap gap-2">
+                                            <Link
+                                                to={`/calendars/${calendar.id}`}
+                                                className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-center font-bold text-white hover:bg-blue-700"
+                                            >
+                                                Open calendar
+                                            </Link>
+                                            {isOwner ? (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openEditForm(calendar)}
+                                                        className="rounded-xl border border-slate-300 px-4 py-2.5 font-bold text-slate-700 hover:bg-slate-50"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCalendarToDelete(calendar)}
+                                                        className="rounded-xl border border-red-200 px-4 py-2.5 font-bold text-red-700 hover:bg-red-50"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </>
+                                            ) : null}
+                                        </div>
                                     </div>
-
-                                    <p className="mt-4 flex-1 text-gray-600 dark:text-gray-400">
-                                        {calendar.memberIds.length}{" "}
-                                        {calendar.memberIds.length === 1 ? "member" : "members"}
-                                    </p>
-
-                                    <Link
-                                        to={`/calendars/${calendar.id}`}
-                                        className="mt-6 block rounded-lg bg-blue-600 px-4 py-2 text-center font-semibold text-white hover:bg-blue-700"
-                                    >
-                                        Open Calendar
-                                    </Link>
                                 </article>
                             );
                         })}
                     </section>
-                ) : (
-                    <section className="mt-8 rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center dark:border-gray-700 dark:bg-gray-900">
-                        <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                            You do not have any calendars yet
-                        </h2>
-
-                        <p className="mt-2 text-gray-600 dark:text-gray-400">
-                            Create your first calendar to begin scheduling events.
-                        </p>
-
-                        <button
-                            type="button"
-                            onClick={handleOpenCreateForm}
-                            className="mt-6 rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
-                        >
-                            Create Your First Calendar
-                        </button>
-                    </section>
                 )}
             </div>
 
-            {isCreateOpen ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-                    <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Create Calendar</h2>
-
-                            <button
-                                type="button"
-                                onClick={handleCloseCreateForm}
-                                disabled={isCreating}
-                                aria-label="Close create calendar form"
-                                className="text-2xl text-gray-500 hover:text-gray-900 disabled:opacity-50 dark:hover:text-white"
-                            >
-                                ×
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleCreateCalendar} className="mt-6 space-y-5">
-                            <div>
-                                <label
-                                    htmlFor="calendar-name"
-                                    className="block font-medium text-gray-700 dark:text-gray-300"
-                                >
-                                    Calendar name
-                                </label>
-
-                                <input
-                                    id="calendar-name"
-                                    type="text"
-                                    value={calendarName}
-                                    onChange={(event) => {
-                                        setCalendarName(event.target.value);
-                                    }}
-                                    required
-                                    disabled={isCreating}
-                                    placeholder="Example: COMP4650 Project"
-                                    className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                                />
-                            </div>
-
-                            {errorMessage !== null ? (
-                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-                                    {errorMessage}
-                                </p>
-                            ) : null}
-
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    type="button"
-                                    onClick={handleCloseCreateForm}
-                                    disabled={isCreating}
-                                    className="rounded-lg border border-gray-300 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                                >
-                                    Cancel
-                                </button>
-
-                                <button
-                                    type="submit"
-                                    disabled={isCreating}
-                                    className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    {isCreating ? "Creating..." : "Create"}
-                                </button>
-                            </div>
-                        </form>
+            <Modal
+                title={editingCalendar ? "Edit calendar" : "Create calendar"}
+                isOpen={isFormOpen}
+                onClose={closeForm}
+                closeDisabled={isSaving}
+            >
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    <div>
+                        <label htmlFor="calendar-name" className="block text-sm font-bold text-slate-700">
+                            Calendar name
+                        </label>
+                        <input
+                            id="calendar-name"
+                            value={form.name}
+                            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                            required
+                            minLength={2}
+                            maxLength={80}
+                            disabled={isSaving}
+                            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            placeholder="COMP4650 Project"
+                        />
                     </div>
+                    <div>
+                        <label htmlFor="calendar-description" className="block text-sm font-bold text-slate-700">
+                            Description
+                        </label>
+                        <textarea
+                            id="calendar-description"
+                            value={form.description}
+                            onChange={(event) =>
+                                setForm((current) => ({ ...current, description: event.target.value }))
+                            }
+                            maxLength={300}
+                            rows={4}
+                            disabled={isSaving}
+                            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            placeholder="What will this calendar be used for?"
+                        />
+                        <p className="mt-1 text-right text-xs text-slate-500">{form.description.length}/300</p>
+                    </div>
+                    <div>
+                        <label htmlFor="calendar-color" className="block text-sm font-bold text-slate-700">
+                            Calendar color
+                        </label>
+                        <div className="mt-2 flex items-center gap-3">
+                            <input
+                                id="calendar-color"
+                                type="color"
+                                value={form.color}
+                                onChange={(event) => setForm((current) => ({ ...current, color: event.target.value }))}
+                                disabled={isSaving}
+                                className="h-11 w-16 cursor-pointer rounded-lg border border-slate-300 bg-white p-1"
+                            />
+                            <span className="text-sm text-slate-600">Used on calendar cards and event accents.</span>
+                        </div>
+                    </div>
+                    {errorMessage ? (
+                        <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                            {errorMessage}
+                        </p>
+                    ) : null}
+                    <div className="flex justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={closeForm}
+                            disabled={isSaving}
+                            className="rounded-xl border border-slate-300 px-4 py-2.5 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSaving}
+                            className="rounded-xl bg-blue-600 px-4 py-2.5 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            {isSaving ? "Saving..." : editingCalendar ? "Save changes" : "Create calendar"}
+                        </button>
+                    </div>
+                </form>
+            </Modal>
+
+            <Modal
+                title="Delete calendar?"
+                isOpen={calendarToDelete !== null}
+                onClose={() => setCalendarToDelete(null)}
+                size="sm"
+                closeDisabled={isSaving}
+            >
+                <p className="text-slate-600">
+                    This permanently deletes <strong>{calendarToDelete?.name}</strong> and every event stored in it.
+                    This action cannot be undone.
+                </p>
+                <div className="mt-6 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        onClick={() => setCalendarToDelete(null)}
+                        disabled={isSaving}
+                        className="rounded-xl border border-slate-300 px-4 py-2.5 font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleDelete}
+                        disabled={isSaving}
+                        className="rounded-xl bg-red-600 px-4 py-2.5 font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                        {isSaving ? "Deleting..." : "Delete calendar"}
+                    </button>
                 </div>
-            ) : null}
+            </Modal>
         </main>
     );
 }

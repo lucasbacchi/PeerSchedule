@@ -7,3 +7,5 @@ dist/
 *.db
 *.sqlite
 public/
+# Firebase Rules use their own syntax
+*.rules

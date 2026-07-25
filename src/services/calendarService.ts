@@ -1,68 +1,154 @@
-import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import {
+    Timestamp,
+    addDoc,
+    arrayRemove,
+    arrayUnion,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    updateDoc,
+    where,
+    writeBatch,
+} from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
 import type { Group } from "@/types/database";
 
 const GROUPS_COLLECTION = "groups";
+const EVENTS_COLLECTION = "events";
+const EVENT_DETAILS_COLLECTION = "eventDetails";
 
-/**
- * Gets every calendar/group that the user belongs to.
- *
- * The owner is also placed in memberIds when a calendar is created,
- * so this returns both owned and shared calendars.
- */
-export const getUserCalendars = async (uid: string): Promise<Group[]> => {
-    const groupsRef = collection(db, GROUPS_COLLECTION);
+export interface CreateCalendarInput {
+    name: string;
+    description?: string;
+    color?: string;
+    ownerId: string;
+}
 
-    const groupsQuery = query(groupsRef, where("memberIds", "array-contains", uid));
+export interface UpdateCalendarInput {
+    name?: string;
+    description?: string;
+    color?: string;
+}
 
-    const snapshot = await getDocs(groupsQuery);
+const calendarFromDocument = (id: string, data: Record<string, unknown>): Group => ({
+    id,
+    name: typeof data.name === "string" ? data.name : "Untitled Calendar",
+    description: typeof data.description === "string" ? data.description : undefined,
+    color: typeof data.color === "string" ? data.color : "#2563eb",
+    ownerId: typeof data.ownerId === "string" ? data.ownerId : "",
+    memberIds: Array.isArray(data.memberIds) ? data.memberIds.filter((value) => typeof value === "string") : [],
+    createdAt: data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.now(),
+    updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt : undefined,
+});
 
-    return snapshot.docs.map((groupDocument) => ({
-        id: groupDocument.id,
-        ...groupDocument.data(),
-    })) as Group[];
+const validateCalendarName = (name: string): string => {
+    const trimmedName = name.trim();
+    if (trimmedName.length < 2 || trimmedName.length > 80) {
+        throw new Error("Calendar name must be between 2 and 80 characters.");
+    }
+    return trimmedName;
 };
 
-/**
- * Creates a new calendar/group and returns the completed Group object.
- */
-export const createCalendar = async (name: string, ownerId: string): Promise<Group> => {
-    const trimmedName = name.trim();
+export const getUserCalendars = async (uid: string): Promise<Group[]> => {
+    const groupsQuery = query(collection(db, GROUPS_COLLECTION), where("memberIds", "array-contains", uid));
+    const snapshot = await getDocs(groupsQuery);
 
-    if (trimmedName.length === 0) {
-        throw new Error("Calendar name is required.");
-    }
+    return snapshot.docs
+        .map((groupDocument) => calendarFromDocument(groupDocument.id, groupDocument.data()))
+        .sort((first, second) => first.name.localeCompare(second.name));
+};
+
+export const getAllCalendars = async (): Promise<Group[]> => {
+    const snapshot = await getDocs(collection(db, GROUPS_COLLECTION));
+    return snapshot.docs.map((groupDocument) => calendarFromDocument(groupDocument.id, groupDocument.data()));
+};
+
+export const createCalendar = async (input: CreateCalendarInput): Promise<Group> => {
+    const name = validateCalendarName(input.name);
+    const description = input.description?.trim().slice(0, 300) ?? "";
+    const trimmedColor = input.color?.trim();
+    const color = trimmedColor && trimmedColor.length > 0 ? trimmedColor : "#2563eb";
+    const now = Timestamp.now();
 
     const newCalendar: Omit<Group, "id"> = {
-        name: trimmedName,
-        ownerId,
-        memberIds: [ownerId],
-        createdAt: Timestamp.now(),
+        name,
+        description,
+        color,
+        ownerId: input.ownerId,
+        memberIds: [input.ownerId],
+        createdAt: now,
+        updatedAt: now,
     };
 
     const documentReference = await addDoc(collection(db, GROUPS_COLLECTION), newCalendar);
-
-    return {
-        id: documentReference.id,
-        ...newCalendar,
-    };
+    return { id: documentReference.id, ...newCalendar };
 };
 
-/**
- * Gets one calendar using its Firestore document ID.
- */
 export const getCalendarById = async (calendarId: string): Promise<Group | null> => {
-    const calendarReference = doc(db, GROUPS_COLLECTION, calendarId);
+    const snapshot = await getDoc(doc(db, GROUPS_COLLECTION, calendarId));
+    return snapshot.exists() ? calendarFromDocument(snapshot.id, snapshot.data()) : null;
+};
 
-    const snapshot = await getDoc(calendarReference);
+export const updateCalendar = async (calendarId: string, input: UpdateCalendarInput): Promise<void> => {
+    const updateData: Record<string, unknown> = { updatedAt: Timestamp.now() };
 
-    if (!snapshot.exists()) {
-        return null;
+    if (input.name !== undefined) {
+        updateData.name = validateCalendarName(input.name);
     }
 
-    return {
-        id: snapshot.id,
-        ...snapshot.data(),
-    } as Group;
+    if (input.description !== undefined) {
+        updateData.description = input.description.trim().slice(0, 300);
+    }
+
+    if (input.color !== undefined) {
+        updateData.color = input.color;
+    }
+
+    await updateDoc(doc(db, GROUPS_COLLECTION, calendarId), updateData);
+};
+
+export const addCalendarMember = async (calendarId: string, userId: string): Promise<void> => {
+    await updateDoc(doc(db, GROUPS_COLLECTION, calendarId), {
+        memberIds: arrayUnion(userId),
+        updatedAt: Timestamp.now(),
+    });
+};
+
+export const removeCalendarMember = async (calendarId: string, userId: string): Promise<void> => {
+    const calendar = await getCalendarById(calendarId);
+    if (!calendar) {
+        throw new Error("Calendar not found.");
+    }
+
+    if (calendar.ownerId === userId) {
+        throw new Error("The calendar owner cannot be removed.");
+    }
+
+    await updateDoc(doc(db, GROUPS_COLLECTION, calendarId), {
+        memberIds: arrayRemove(userId),
+        updatedAt: Timestamp.now(),
+    });
+};
+
+export const deleteCalendar = async (calendarId: string): Promise<void> => {
+    const eventsQuery = query(collection(db, EVENTS_COLLECTION), where("calendarId", "==", calendarId));
+    const eventSnapshot = await getDocs(eventsQuery);
+
+    // Each event requires two deletes: its public schedule document and its
+    // private detail document. Keep each batch comfortably below 500 writes.
+    const eventDocuments = eventSnapshot.docs;
+    for (let start = 0; start < eventDocuments.length; start += 225) {
+        const batch = writeBatch(db);
+        for (const eventDocument of eventDocuments.slice(start, start + 225)) {
+            batch.delete(doc(db, EVENT_DETAILS_COLLECTION, eventDocument.id));
+            batch.delete(eventDocument.ref);
+        }
+        await batch.commit();
+    }
+
+    await deleteDoc(doc(db, GROUPS_COLLECTION, calendarId));
 };

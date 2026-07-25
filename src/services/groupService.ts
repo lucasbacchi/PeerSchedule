@@ -1,70 +1,73 @@
-import { db } from "@/lib/firebase";
-import { Group } from "@/types/database";
-import { addDoc, collection, deleteDoc, getDocs, updateDoc } from "firebase/firestore";
+import type { Group } from "@/types/database";
+import {
+    addCalendarMember,
+    createCalendar,
+    deleteCalendar,
+    getAllCalendars,
+    getCalendarById,
+    getUserCalendars,
+    removeCalendarMember,
+    updateCalendar,
+} from "./calendarService";
 
-export const getAllGroups = async () => {
-    const groupsRef = collection(db, "groups");
-    const snapshot = await getDocs(groupsRef);
-    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as Group[];
+/**
+ * Compatibility layer for the original project service name. New code should
+ * prefer calendarService.ts because Group represents a shared calendar.
+ */
+export const getAllGroups = getAllCalendars;
+export const getGroupById = getCalendarById;
+
+export const getGroupsByOwnerId = async (ownerId: string): Promise<Group[]> => {
+    const groups = await getUserCalendars(ownerId);
+    return groups.filter((group) => group.ownerId === ownerId);
 };
 
-export const getGroupById = async (groupId: string) => {
-    const groupsRef = collection(db, "groups");
-    const snapshot = await getDocs(groupsRef);
-    const doc = snapshot.docs.find((doc) => doc.id === groupId);
-    return doc ? ({ id: doc.id, ...doc.data() } as Group) : null;
-};
+export const getGroupsByMemberId = getUserCalendars;
 
-export const getGroupsByOwnerId = async (ownerId: string) => {
-    const groupsRef = collection(db, "groups");
-    const snapshot = await getDocs(groupsRef);
-    const groups = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }) as Group)
-        .filter((group) => group.ownerId === ownerId);
-    return groups;
-};
-
-export const getGroupsByMemberId = async (memberId: string) => {
-    const groupsRef = collection(db, "groups");
-    const snapshot = await getDocs(groupsRef);
-    const groups = snapshot.docs;
-    return groups
-        .map((doc) => ({ id: doc.id, ...doc.data() }) as Group)
-        .filter((group) => group.memberIds.includes(memberId));
-};
-
-export const getGroupsByIds = async (groupIds: string[]) => {
-    if (groupIds.length === 0) {
-        return [];
-    }
-    const groupsRef = collection(db, "groups");
-    const snapshot = await getDocs(groupsRef);
-    const groups = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }) as Group)
-        .filter((group) => groupIds.includes(group.id));
-    return groups;
+export const getGroupsByIds = async (groupIds: string[]): Promise<Group[]> => {
+    const groups = await Promise.all([...new Set(groupIds)].map((groupId) => getCalendarById(groupId)));
+    return groups.filter((group): group is Group => group !== null);
 };
 
 export const createGroup = async (group: Omit<Group, "id">): Promise<string> => {
-    const groupsRef = collection(db, "groups");
-    const docRef = await addDoc(groupsRef, group);
-    return docRef.id;
+    const createdGroup = await createCalendar({
+        name: group.name,
+        description: group.description,
+        color: group.color,
+        ownerId: group.ownerId,
+    });
+
+    const additionalMemberIds = group.memberIds.filter((memberId) => memberId !== group.ownerId);
+    await Promise.all(additionalMemberIds.map((memberId) => addCalendarMember(createdGroup.id, memberId)));
+    return createdGroup.id;
 };
 
 export const updateGroup = async (groupId: string, updatedData: Partial<Group>): Promise<void> => {
-    const groupsRef = collection(db, "groups");
-    const snapshot = await getDocs(groupsRef);
-    const doc = snapshot.docs.find((doc) => doc.id === groupId);
-    if (doc) {
-        await updateDoc(doc.ref, updatedData);
+    const existingGroup = await getCalendarById(groupId);
+    if (!existingGroup) {
+        throw new Error("Calendar not found.");
+    }
+
+    await updateCalendar(groupId, {
+        name: updatedData.name,
+        description: updatedData.description,
+        color: updatedData.color,
+    });
+
+    if (updatedData.memberIds) {
+        const requestedMembers = new Set(updatedData.memberIds);
+        requestedMembers.add(existingGroup.ownerId);
+
+        const membersToAdd = [...requestedMembers].filter((memberId) => !existingGroup.memberIds.includes(memberId));
+        const membersToRemove = existingGroup.memberIds.filter(
+            (memberId) => memberId !== existingGroup.ownerId && !requestedMembers.has(memberId)
+        );
+
+        await Promise.all([
+            ...membersToAdd.map((memberId) => addCalendarMember(groupId, memberId)),
+            ...membersToRemove.map((memberId) => removeCalendarMember(groupId, memberId)),
+        ]);
     }
 };
 
-export const deleteGroup = async (groupId: string): Promise<void> => {
-    const groupsRef = collection(db, "groups");
-    const snapshot = await getDocs(groupsRef);
-    const doc = snapshot.docs.find((doc) => doc.id === groupId);
-    if (doc) {
-        await deleteDoc(doc.ref);
-    }
-};
+export const deleteGroup = deleteCalendar;

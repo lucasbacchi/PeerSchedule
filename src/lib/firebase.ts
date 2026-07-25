@@ -1,7 +1,6 @@
-import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp, getFirestore, initializeFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
     apiKey: "AIzaSyD3CJRaq-8pA5NFiG3val_WXVQGogd_Zlk",
@@ -13,9 +12,17 @@ const firebaseConfig = {
     measurementId: "G-HP4YMNXMDX",
 };
 
-// Initialize Firebase
-export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+const existingApp = getApps().length > 0;
+export const app = existingApp ? getApp() : initializeApp(firebaseConfig);
+
+// Ignore optional undefined fields such as photoURL or recurrenceRule. When Vite
+// hot reloads this module, reuse the already-initialized Firestore instance.
+export const db = existingApp
+    ? getFirestore(app)
+    : initializeFirestore(app, {
+          ignoreUndefinedProperties: true,
+      });
+
 export const auth = getAuth(app);
 
 export const dateToTimestamp = (date: Date | number | string): Timestamp => {
@@ -23,6 +30,5 @@ export const dateToTimestamp = (date: Date | number | string): Timestamp => {
     return Timestamp.fromDate(normalizedDate);
 };
 
-export const timestampToDate = (timestamp: Timestamp | null | undefined): Date | null => {
-    return timestamp ? timestamp.toDate() : null;
-};
+export const timestampToDate = (timestamp: Timestamp | null | undefined): Date | null =>
+    timestamp ? timestamp.toDate() : null;

@@ -2,18 +2,194 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
-    match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2026, 7, 25);
+    function currentUserId() {
+      return request.auth.uid;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(currentUserId()))
+        && get(/databases/$(database)/documents/users/$(currentUserId())).data.role == "admin";
+    }
+
+    function calendarExists(calendarId) {
+      return calendarId != null
+        && exists(/databases/$(database)/documents/groups/$(calendarId));
+    }
+
+    function calendarData(calendarId) {
+      return get(/databases/$(database)/documents/groups/$(calendarId)).data;
+    }
+
+    function isCalendarMember(calendarId) {
+      return signedIn()
+        && calendarExists(calendarId)
+        && currentUserId() in calendarData(calendarId).memberIds;
+    }
+
+    function isCalendarOwner(calendarId) {
+      return signedIn()
+        && calendarExists(calendarId)
+        && calendarData(calendarId).ownerId == currentUserId();
+    }
+
+    match /users/{userId} {
+      allow create: if signedIn()
+        && userId == currentUserId()
+        && request.resource.data.uid == currentUserId()
+        && request.resource.data.role == "user";
+
+      // Authenticated users may search basic user profiles for friend and member lookup.
+      allow read: if signedIn();
+
+      allow update: if isAdmin()
+        || (signedIn()
+          && userId == currentUserId()
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.role == resource.data.role);
+
+      allow delete: if isAdmin()
+        || (signedIn()
+          && (userId == currentUserId()
+            || resource.data.uid == currentUserId()));
+    }
+
+    match /groups/{groupId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerId == currentUserId()
+        && currentUserId() in request.resource.data.memberIds
+        && request.resource.data.name is string;
+
+      allow read: if isAdmin()
+        || (signedIn() && currentUserId() in resource.data.memberIds);
+
+      allow update: if isAdmin()
+        || (signedIn() && resource.data.ownerId == currentUserId())
+        || (signedIn()
+          && currentUserId() in resource.data.memberIds
+          && resource.data.ownerId != currentUserId()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["memberIds", "updatedAt"])
+          && !(currentUserId() in request.resource.data.memberIds)
+          && request.resource.data.memberIds.toSet()
+            == resource.data.memberIds.toSet().difference([currentUserId()].toSet()));
+
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.ownerId == currentUserId());
+    }
+
+    match /events/{eventId} {
+      function eventCalendarId() {
+        return resource.data.calendarId;
+      }
+
+      function requestedCalendarId() {
+        return request.resource.data.calendarId;
+      }
+
+      function canReadExistingEvent() {
+        return isAdmin()
+          || (signedIn() && resource.data.creatorId == currentUserId())
+          || (signedIn()
+            && resource.data.participantIds is list
+            && currentUserId() in resource.data.participantIds)
+          || isCalendarMember(eventCalendarId());
+      }
+
+      function canManageExistingEvent() {
+        return isAdmin()
+          || (signedIn() && resource.data.creatorId == currentUserId())
+          || isCalendarOwner(eventCalendarId());
+      }
+
+      function isOwnParticipantOnlyUpdate() {
+        return signedIn()
+          && canReadExistingEvent()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["participants", "participantIds", "updatedAt"])
+          && request.resource.data.participants.diff(resource.data.participants)
+            .affectedKeys().hasOnly([currentUserId()]);
+      }
+
+      allow create: if signedIn()
+        && request.resource.data.creatorId == currentUserId()
+        && request.resource.data.title is string
+        && request.resource.data.startTime < request.resource.data.endTime
+        && request.resource.data.participantIds is list
+        && currentUserId() in request.resource.data.participantIds
+        && (requestedCalendarId() == null || isCalendarMember(requestedCalendarId()));
+
+      allow read: if canReadExistingEvent();
+      allow update: if canManageExistingEvent() || isOwnParticipantOnlyUpdate();
+      allow delete: if canManageExistingEvent();
+    }
+
+
+    match /eventDetails/{eventId} {
+      function linkedEvent() {
+        return get(/databases/$(database)/documents/events/$(eventId)).data;
+      }
+
+      function linkedEventAfter() {
+        return getAfter(/databases/$(database)/documents/events/$(eventId)).data;
+      }
+
+      function canManageLinkedEvent() {
+        return isAdmin()
+          || (signedIn() && linkedEvent().creatorId == currentUserId())
+          || isCalendarOwner(linkedEvent().calendarId);
+      }
+
+      allow create: if signedIn()
+        && (isAdmin()
+          || linkedEventAfter().creatorId == currentUserId()
+          || isCalendarOwner(linkedEventAfter().calendarId))
+        && request.resource.data.creatorId == linkedEventAfter().creatorId
+        && request.resource.data.calendarId == linkedEventAfter().calendarId;
+
+      allow read: if isAdmin()
+        || (signedIn()
+          && exists(/databases/$(database)/documents/events/$(eventId))
+          && (linkedEvent().creatorId == currentUserId()
+            || (linkedEvent().participantIds is list
+              && currentUserId() in linkedEvent().participantIds)
+            || isCalendarOwner(linkedEvent().calendarId)
+            || (resource.data.viewerIds is list
+              && currentUserId() in resource.data.viewerIds)));
+
+      allow update, delete: if signedIn()
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && canManageLinkedEvent();
+    }
+
+    match /friendRequests/{requestId} {
+      allow create: if signedIn()
+        && request.resource.data.senderId == currentUserId()
+        && request.resource.data.receiverId != currentUserId()
+        && request.resource.data.status == "pending";
+
+      allow read: if isAdmin()
+        || (signedIn()
+          && (resource.data.senderId == currentUserId()
+            || resource.data.receiverId == currentUserId()));
+
+      allow update: if isAdmin()
+        || (signedIn()
+          && resource.data.receiverId == currentUserId()
+          && resource.data.status == "pending"
+          && request.resource.data.senderId == resource.data.senderId
+          && request.resource.data.receiverId == resource.data.receiverId
+          && request.resource.data.status in ["accepted", "declined"]
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "respondedAt"]));
+
+      allow delete: if isAdmin()
+        || (signedIn()
+          && (resource.data.senderId == currentUserId()
+            || resource.data.receiverId == currentUserId()));
     }
   }
 }

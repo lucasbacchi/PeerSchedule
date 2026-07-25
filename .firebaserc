@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "peer-schedule"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

@@ -1,73 +1,103 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 
+import { useAuth } from "@/hooks/useAuth";
 import logo from "../public/img/TempLogo.png";
 
 export default function HomePage() {
     const navigate = useNavigate();
-
+    const { user, isLoading } = useAuth();
     const [isSigningIn, setIsSigningIn] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
 
-    const performGoogleSignIn = async (): Promise<void> => {
-        try {
-            setIsSigningIn(true);
-            setMessage(null);
-
-            // Firebase Auth loads only after the button is clicked.
-            const { signInWithGoogle } = await import("../services/authService");
-
-            await signInWithGoogle();
-
-            // Send the user to the calendar selection page.
-            await navigate("/calendars", {
-                replace: true,
-            });
-        } catch (error: unknown) {
-            console.error("Google sign-in failed:", error);
-
-            if (error instanceof Error) {
-                setMessage(`Sign-in failed: ${error.message}`);
-            } else {
-                setMessage("Google sign-in failed. Please try again.");
+    const handlePrimaryAction = (): void => {
+        void (async () => {
+            if (user) {
+                await navigate("/calendars");
+                return;
             }
-        } finally {
-            setIsSigningIn(false);
-        }
-    };
 
-    const handleGoogleSignIn = (): void => {
-        void performGoogleSignIn();
+            try {
+                setIsSigningIn(true);
+                setMessage(null);
+                const { signInWithGoogle } = await import("../services/authService");
+                await signInWithGoogle();
+                await navigate("/calendars", { replace: true });
+            } catch (error: unknown) {
+                console.error("Google sign-in failed:", error);
+                setMessage(
+                    error instanceof Error
+                        ? `Sign-in failed: ${error.message}`
+                        : "Google sign-in failed. Please try again."
+                );
+            } finally {
+                setIsSigningIn(false);
+            }
+        })();
     };
 
     return (
-        <div className="space-y-6 lg:space-y-8">
+        <main className="bg-gradient-to-b from-blue-50 via-white to-slate-50">
             <title>Home | PeerSchedule</title>
+            <section className="mx-auto grid min-h-[calc(100vh-65px)] max-w-7xl items-center gap-12 px-4 py-12 lg:grid-cols-2 lg:px-8">
+                <div>
+                    <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">
+                        Plan together without the scheduling chaos
+                    </span>
+                    <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 sm:text-6xl">
+                        Shared calendars built for peers.
+                    </h1>
+                    <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
+                        PeerSchedule helps groups share calendars, coordinate availability, invite participants, and
+                        manage meetings in one place.
+                    </p>
+                    <div className="mt-8 flex flex-wrap items-center gap-4">
+                        <button
+                            type="button"
+                            onClick={handlePrimaryAction}
+                            disabled={isSigningIn || isLoading}
+                            className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {isLoading
+                                ? "Loading..."
+                                : isSigningIn
+                                  ? "Signing in..."
+                                  : user
+                                    ? "Open my calendars"
+                                    : "Sign in with Google"}
+                        </button>
+                        <span className="text-sm text-slate-500">No separate password required.</span>
+                    </div>
+                    {message ? (
+                        <p
+                            role="alert"
+                            className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                        >
+                            {message}
+                        </p>
+                    ) : null}
+                </div>
 
-            <div className="mx-auto max-w-4xl px-4">
-                <h1 className="text-3xl font-bold">Welcome to PeerSchedule</h1>
-
-                <p className="mt-4 text-lg text-gray-600 dark:text-gray-400">
-                    PeerSchedule is a calendar-sharing application for managing group meetings and schedules. You can
-                    create a group, add members, and share your schedules with them. You can also view the schedules of
-                    other members in the group and find a common time for meetings.
-                </p>
-            </div>
-
-            <div className="flex flex-col items-center gap-4 px-4">
-                <p>Sign in with Google to get started.</p>
-
-                <button
-                    type="button"
-                    onClick={handleGoogleSignIn}
-                    disabled={isSigningIn}
-                    className="rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                    {isSigningIn ? "Signing in..." : "Sign in with Google"}
-                </button>
-
-                {message !== null ? <p className="text-center text-red-600">{message}</p> : null}
-            </div>
-        </div>
+                <div className="relative mx-auto w-full max-w-lg">
+                    <div className="absolute -inset-5 rounded-[2rem] bg-blue-200/50 blur-2xl" />
+                    <div className="relative rounded-[2rem] border border-blue-100 bg-white p-8 shadow-xl">
+                        <img src={logo} alt="PeerSchedule logo" className="mx-auto h-28 w-28 object-contain" />
+                        <div className="mt-8 grid gap-4 sm:grid-cols-2">
+                            {[
+                                ["Shared calendars", "Keep projects, clubs, and study groups organized."],
+                                ["Meeting invites", "Track pending, accepted, and declined responses."],
+                                ["Availability", "Share full details or show only that you are busy."],
+                                ["Friend connections", "Find other users and coordinate with trusted peers."],
+                            ].map(([title, description]) => (
+                                <article key={title} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                    <h2 className="font-bold text-slate-900">{title}</h2>
+                                    <p className="mt-1 text-sm text-slate-600">{description}</p>
+                                </article>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
     );
 }
