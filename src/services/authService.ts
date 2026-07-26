@@ -5,6 +5,33 @@ import { Timestamp } from "firebase/firestore";
 import { auth } from "@/lib/firebase";
 import { createUser, getUserById, updateUser } from "./userService";
 
+const normalizeGoogleName = (displayName: string | null | undefined, email: string | null | undefined): string => {
+    const trimmedName = displayName?.trim();
+    if (trimmedName) {
+        return trimmedName;
+    }
+
+    const emailLocalPart = email?.split("@")[0]?.trim();
+    if (emailLocalPart) {
+        return emailLocalPart;
+    }
+
+    return "PeerSchedule User";
+};
+
+const buildCachedProfile = (firebaseUser: FirebaseUser) => {
+    const displayName = normalizeGoogleName(firebaseUser.displayName, firebaseUser.email);
+    const email = firebaseUser.email?.trim() ?? "";
+
+    return {
+        displayName,
+        displayNameLower: displayName.toLowerCase(),
+        email,
+        emailLower: email.toLowerCase(),
+        photoURL: firebaseUser.photoURL ?? undefined,
+    };
+};
+
 export const signInWithGoogle = async (): Promise<FirebaseUser> => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
@@ -12,42 +39,26 @@ export const signInWithGoogle = async (): Promise<FirebaseUser> => {
     const result = await signInWithPopup(auth, provider);
     const firebaseUser = result.user;
     const existingUser = await getUserById(firebaseUser.uid);
+    const cachedProfile = buildCachedProfile(firebaseUser);
 
     if (!existingUser) {
-        const googleDisplayName = firebaseUser.displayName?.trim();
-        const emailLocalPart = firebaseUser.email?.split("@")[0]?.trim();
-        const displayName =
-            googleDisplayName && googleDisplayName.length > 0
-                ? googleDisplayName
-                : emailLocalPart && emailLocalPart.length > 0
-                  ? emailLocalPart
-                  : "PeerSchedule User";
-        const email = firebaseUser.email?.trim() ?? "";
-
         await createUser({
             uid: firebaseUser.uid,
-            displayName,
-            displayNameLower: displayName.toLowerCase(),
-            email,
-            emailLower: email.toLowerCase(),
-            photoURL: firebaseUser.photoURL ?? undefined,
+            ...cachedProfile,
             role: "user",
             friendIds: [],
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
         });
     } else {
-        const trimmedGoogleName = firebaseUser.displayName?.trim();
-        const trimmedGoogleEmail = firebaseUser.email?.trim();
-        const nextDisplayName =
-            trimmedGoogleName && trimmedGoogleName.length > 0 ? trimmedGoogleName : existingUser.displayName;
-        const nextEmail = trimmedGoogleEmail && trimmedGoogleEmail.length > 0 ? trimmedGoogleEmail : existingUser.email;
+        const hasChanges =
+            existingUser.displayName !== cachedProfile.displayName ||
+            existingUser.email !== cachedProfile.email ||
+            existingUser.photoURL !== cachedProfile.photoURL;
 
-        await updateUser(firebaseUser.uid, {
-            displayName: nextDisplayName,
-            email: nextEmail,
-            photoURL: firebaseUser.photoURL ?? existingUser.photoURL,
-        });
+        if (hasChanges) {
+            await updateUser(firebaseUser.uid, cachedProfile);
+        }
     }
 
     return firebaseUser;
@@ -66,7 +77,10 @@ export const updateSignedInUserProfile = async (displayName: string): Promise<vo
     }
 
     await updateProfile(currentUser, { displayName: trimmedName });
-    await updateUser(currentUser.uid, { displayName: trimmedName });
+    await updateUser(currentUser.uid, {
+        displayName: trimmedName,
+        displayNameLower: trimmedName.toLowerCase(),
+    });
 };
 
 export const signOut = async (): Promise<void> => {

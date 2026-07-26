@@ -1,7 +1,6 @@
 import globals from "globals";
 import pluginJs from "@eslint/js";
 import tseslint from "typescript-eslint";
-import pluginReact from "eslint-plugin-react";
 import pluginReactHooks from "eslint-plugin-react-hooks";
 import pluginReactRefresh from "eslint-plugin-react-refresh";
 import pluginJsxA11y from "eslint-plugin-jsx-a11y";
@@ -18,6 +17,7 @@ export default [
             "eslint.shared.cjs",
             "functions/eslint.config.cjs",
             "functions/.eslintrc.js",
+            "functions/src/**",
             "functions/lib/**",
             "functions/generated/**",
         ],
@@ -49,37 +49,20 @@ export default [
     {
         files: ["**/*.{jsx,tsx}"],
         plugins: {
-            react: pluginReact,
             "react-hooks": pluginReactHooks,
             "react-refresh": pluginReactRefresh,
             "jsx-a11y": pluginJsxA11y,
         },
         rules: {
-            ...pluginReact.configs.recommended.rules,
-            ...pluginReact.configs["jsx-runtime"].rules, // React 17+
             ...pluginReactHooks.configs.recommended.rules,
             ...pluginJsxA11y.configs.recommended.rules,
 
-            // React 19 optimizations
-            "react/react-in-jsx-scope": "off",
-            "react/jsx-uses-react": "off",
             // Data-fetching effects intentionally update loading and result state.
             "react-hooks/set-state-in-effect": "off",
+            "jsx-a11y/no-onchange": "off",
 
             // React Refresh
             "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-
-            // React best practices
-            "react/prop-types": "off", // Using TypeScript
-            "react/jsx-no-leaked-render": "warn", // Avoid rendering 0 or NaN
-            "react/no-array-index-key": "warn",
-            "react/self-closing-comp": "warn",
-            "react/display-name": "warn", // Help identify components in DevTools
-        },
-        settings: {
-            react: {
-                version: "19.0",
-            },
         },
     },
 

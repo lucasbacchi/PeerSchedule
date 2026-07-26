@@ -1,10 +1,10 @@
 import {
-    Timestamp,
     addDoc,
     arrayRemove,
     arrayUnion,
     collection,
     deleteDoc,
+    deleteField,
     doc,
     getDoc,
     getDocs,
@@ -13,6 +13,7 @@ import {
     where,
     writeBatch,
 } from "firebase/firestore";
+import { Timestamp } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
 import type { Group } from "@/types/database";
@@ -126,6 +127,30 @@ export const removeCalendarMember = async (calendarId: string, userId: string): 
 
     if (calendar.ownerId === userId) {
         throw new Error("The calendar owner cannot be removed.");
+    }
+
+    const eventsQuery = query(collection(db, EVENTS_COLLECTION), where("calendarId", "==", calendarId));
+    const eventSnapshot = await getDocs(eventsQuery);
+
+    // Removing a member must also revoke access to existing events in the calendar.
+    // Update both the public event document and the private details document so the
+    // former member loses participant and viewer access.
+    for (let start = 0; start < eventSnapshot.docs.length; start += 225) {
+        const batch = writeBatch(db);
+
+        for (const eventDocument of eventSnapshot.docs.slice(start, start + 225)) {
+            batch.update(eventDocument.ref, {
+                [`participants.${userId}`]: deleteField(),
+                participantIds: arrayRemove(userId),
+                updatedAt: Timestamp.now(),
+            });
+            batch.update(doc(db, EVENT_DETAILS_COLLECTION, eventDocument.id), {
+                viewerIds: arrayRemove(userId),
+                updatedAt: Timestamp.now(),
+            });
+        }
+
+        await batch.commit();
     }
 
     await updateDoc(doc(db, GROUPS_COLLECTION, calendarId), {

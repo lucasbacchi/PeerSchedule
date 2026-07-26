@@ -103,13 +103,21 @@ export default function FriendsPage() {
     if (isAuthLoading || (user && isLoading)) {
         return <PageState title="Loading friends" message="Retrieving friend requests and connections..." />;
     }
-    if (!user) return null;
+    if (!user) {
+        return (
+            <PageState
+                title="Friends unavailable"
+                message="Sign in to view and manage your friends list."
+                tone="error"
+            />
+        );
+    }
 
     const pendingIncoming = incoming.filter((request) => request.status === "pending");
     const pendingOutgoing = outgoing.filter((request) => request.status === "pending");
 
     return (
-        <main className="min-h-[calc(100vh-65px)] bg-slate-50">
+        <main className="min-h-[calc(100dvh-66px)] bg-slate-50">
             <title>Friends | PeerSchedule</title>
             <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
                 <div>

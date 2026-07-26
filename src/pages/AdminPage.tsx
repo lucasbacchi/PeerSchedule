@@ -94,7 +94,7 @@ export default function AdminPage() {
     }
 
     return (
-        <main className="min-h-[calc(100vh-65px)] bg-slate-50">
+        <main className="min-h-[calc(100dvh-66px)] bg-slate-50">
             <title>Admin | PeerSchedule</title>
             <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
                 <p className="text-sm font-bold uppercase tracking-wide text-blue-600">Protected administration</p>

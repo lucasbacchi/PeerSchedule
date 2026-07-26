@@ -92,7 +92,9 @@ service cloud.firestore {
 
       function canReadExistingEvent() {
         return isAdmin()
-          || (signedIn() && resource.data.creatorId == currentUserId())
+          || (signedIn()
+            && resource.data.creatorId == currentUserId()
+            && (eventCalendarId() == null || isCalendarMember(eventCalendarId())))
           || (signedIn()
             && resource.data.participantIds is list
             && currentUserId() in resource.data.participantIds)
@@ -101,7 +103,9 @@ service cloud.firestore {
 
       function canManageExistingEvent() {
         return isAdmin()
-          || (signedIn() && resource.data.creatorId == currentUserId())
+          || (signedIn()
+            && resource.data.creatorId == currentUserId()
+            && (eventCalendarId() == null || isCalendarMember(eventCalendarId())))
           || isCalendarOwner(eventCalendarId());
       }
 
@@ -139,7 +143,9 @@ service cloud.firestore {
 
       function canManageLinkedEvent() {
         return isAdmin()
-          || (signedIn() && linkedEvent().creatorId == currentUserId())
+          || (signedIn()
+            && linkedEvent().creatorId == currentUserId()
+            && (linkedEvent().calendarId == null || isCalendarMember(linkedEvent().calendarId)))
           || isCalendarOwner(linkedEvent().calendarId);
       }
 
@@ -153,7 +159,8 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (signedIn()
           && exists(/databases/$(database)/documents/events/$(eventId))
-          && (linkedEvent().creatorId == currentUserId()
+          && ((linkedEvent().creatorId == currentUserId()
+              && (linkedEvent().calendarId == null || isCalendarMember(linkedEvent().calendarId)))
             || (linkedEvent().participantIds is list
               && currentUserId() in linkedEvent().participantIds)
             || isCalendarOwner(linkedEvent().calendarId)

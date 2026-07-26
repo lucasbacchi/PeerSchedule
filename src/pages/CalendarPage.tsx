@@ -127,7 +127,7 @@ export default function CalendarPage() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-    const [currentTime] = useState(() => Date.now());
+    const [currentTime, setCurrentTime] = useState(() => Date.now());
     const [displayMonth, setDisplayMonth] = useState(() => {
         const now = new Date();
         return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -185,6 +185,14 @@ export default function CalendarPage() {
     useEffect(() => {
         void loadCalendar();
     }, [loadCalendar]);
+
+    useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            setCurrentTime(Date.now());
+        }, 60_000);
+
+        return () => window.clearInterval(intervalId);
+    }, []);
 
     const eventsByDate = useMemo(() => {
         const grouped = new Map<string, CalendarEvent[]>();
@@ -451,7 +459,7 @@ export default function CalendarPage() {
     const upcomingEvents = events.filter((event) => event.endTime.toMillis() >= currentTime).slice(0, 6);
 
     return (
-        <main className="min-h-[calc(100vh-65px)] bg-slate-50">
+        <main className="min-h-[calc(100dvh-66px)] bg-slate-50">
             <title>{calendar.name} | PeerSchedule</title>
             <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">

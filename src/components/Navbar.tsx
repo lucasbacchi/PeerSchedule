@@ -63,11 +63,10 @@ export default function Navbar() {
             <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
                 <NavLink
                     to={user ? "/calendars" : "/"}
-                    className="flex min-w-0 items-center gap-3"
+                    className="flex min-w-0 items-center"
                     aria-label="PeerSchedule home"
                 >
                     <img src={logo} alt="" className="h-10 w-10 rounded-lg bg-white object-contain p-1" />
-                    <span className="truncate text-xl font-bold text-white">PeerSchedule</span>
                 </NavLink>
 
                 {!isLoading && user ? (

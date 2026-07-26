@@ -30,7 +30,7 @@ html {
 body {
     margin: 0;
     min-width: 320px;
-    min-height: 100vh;
+    min-height: 100dvh;
     background: #f8fafc;
 }
 
@@ -44,6 +44,10 @@ select {
 button,
 a {
     -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled) {
+    cursor: pointer;
 }
 
 button:focus-visible,

@@ -3,8 +3,6 @@ const sharedIgnores = [
     "**/public/**",
     "**/node_modules/**",
     "**/.react-router/**",
-    "**/*.config.js",
-    "**/*.config.ts",
     "**/components/ui/**",
 ];
 

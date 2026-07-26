@@ -24,7 +24,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <link rel="icon" type="image/x-icon" href={favicon} />
             </head>
             <body>
-                <div id="root" className="relative min-h-screen flex flex-col items-stretch">
+                <div id="root" className="relative min-h-dvh flex flex-col items-stretch">
                     {children}
                 </div>
                 <ScrollRestoration />
