@@ -384,19 +384,12 @@ export const getEventsByCalendarId = async (calendarId: string): Promise<Calenda
 
 export const getUserEvents = async (uid: string): Promise<CalendarEvent[]> => {
     const eventsReference = collection(db, EVENTS_COLLECTION);
-    const [participantSnapshot, creatorSnapshot] = await Promise.all([
-        getDocs(query(eventsReference, where("participantIds", "array-contains", uid))),
-        getDocs(query(eventsReference, where("creatorId", "==", uid))),
-    ]);
-
-    const events = new Map<string, CalendarEvent>();
-    for (const eventDocument of [...participantSnapshot.docs, ...creatorSnapshot.docs]) {
-        events.set(eventDocument.id, eventFromDocument(eventDocument.id, eventDocument.data()));
-    }
-
-    const sortedEvents = [...events.values()].sort(
-        (first, second) => first.startTime.toMillis() - second.startTime.toMillis()
+    const participantSnapshot = await getDocs(
+        query(eventsReference, where("participantIds", "array-contains", uid))
     );
+    const sortedEvents = participantSnapshot.docs
+        .map((eventDocument) => eventFromDocument(eventDocument.id, eventDocument.data()))
+        .sort((first, second) => first.startTime.toMillis() - second.startTime.toMillis());
     return hydrateEvents(sortedEvents);
 };
 

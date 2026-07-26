@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import PageState from "@/components/common/PageState";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { getUserCalendars } from "@/services/calendarService";
-import { getUserEvents } from "@/services/calendarEventService";
+import { getEventsByCalendarId } from "@/services/calendarEventService";
 import type { CalendarEvent, Group } from "@/types/database";
 
 export default function PlansPage() {
@@ -20,7 +20,17 @@ export default function PlansPage() {
         try {
             setIsLoading(true);
             setErrorMessage(null);
-            const [nextEvents, nextGroups] = await Promise.all([getUserEvents(user.uid), getUserCalendars(user.uid)]);
+            const nextGroups = await getUserCalendars(user.uid);
+            const groupEvents = await Promise.all(nextGroups.map((group) => getEventsByCalendarId(group.id)));
+            const nextEvents = groupEvents
+                .flat()
+                .filter(
+                    (event) =>
+                        event.creatorId === user.uid ||
+                        event.participantIds.includes(user.uid) ||
+                        event.type === "open_event"
+                )
+                .sort((first, second) => first.startTime.toMillis() - second.startTime.toMillis());
             setEvents(nextEvents);
             setGroups(nextGroups);
         } catch (error: unknown) {
