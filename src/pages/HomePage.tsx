@@ -145,6 +145,11 @@ function Title() {
 }
 
 export default function MainPage() {
+    const calendars = scheduleStore.calendars();
+    const events = scheduleStore.events()
+        .filter((event) => new Date(`${event.date}T${event.start}`) >= new Date())
+        .sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`))
+        .slice(0, 5);
     return (
         <div className="bg-[#F8FAFC] flex flex-col font-['Inter',sans-serif]" data-name="Main Page">
             <main className="flex-1 px-10 pt-6 pb-8">

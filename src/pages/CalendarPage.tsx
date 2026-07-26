@@ -1,276 +1,94 @@
-﻿import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Link, useParams } from "react-router";
+import { type StoredEvent, scheduleStore } from "@/lib/localStore";
 
-interface CalendarEvent {
-  id: string;
-  title: string;
-  date: Date;
-  color?: string;
-}
-
-function isSameMonth(dateLeft: Date, dateRight: Date) {
-  return dateLeft.getFullYear() === dateRight.getFullYear() && dateLeft.getMonth() === dateRight.getMonth();
-}
-
-function isSameDay(dateLeft: Date, dateRight: Date) {
-  return (
-    dateLeft.getFullYear() === dateRight.getFullYear() &&
-    dateLeft.getMonth() === dateRight.getMonth() &&
-    dateLeft.getDate() === dateRight.getDate()
-  );
-}
-
-function isToday(date: Date) {
-  return isSameDay(date, new Date());
-}
-
-function padStart(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function formatDate(date: Date, pattern: string) {
-  const day = String(date.getDate());
-  const month = String(date.getMonth() + 1);
-  const year = String(date.getFullYear());
-  const weekday = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
-  const monthName = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ][date.getMonth()];
-
-  return pattern.replace(/EEEE|MMMM|MMM|MM|M|yyyy|yy|d/g, (token) => {
-    switch (token) {
-      case "EEEE":
-        return weekday;
-      case "MMMM":
-        return monthName;
-      case "MMM":
-        return monthName.slice(0, 3);
-      case "MM":
-        return padStart(Number(month));
-      case "M":
-        return month;
-      case "yyyy":
-        return year;
-      case "yy":
-        return year.slice(-2);
-      case "d":
-        return day;
-      default:
-        return token;
-    }
+function monthDays(month: Date) {
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(1 - first.getDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    return day;
   });
 }
 
-function addDays(date: Date, amount: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + amount);
-  return next;
-}
-
-function addMonths(date: Date, amount: number) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + amount);
-  return next;
-}
-
-function subMonths(date: Date, amount: number) {
-  return addMonths(date, -amount);
-}
-
-function startOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function endOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
-}
-
-function startOfWeek(date: Date) {
-  const day = date.getDay();
-  return addDays(date, -day);
-}
-
-function endOfWeek(date: Date) {
-  const day = date.getDay();
-  return addDays(date, 6 - day);
-}
-
-function DayCell({
-  date,
-  currentMonth,
-  events,
-  selected,
-  onSelect,
-}: {
-  date: Date;
-  currentMonth: Date;
-  events: CalendarEvent[];
-  selected: boolean;
-  onSelect: (d: Date) => void;
-}) {
-  const inMonth = isSameMonth(date, currentMonth);
-  const today = isToday(date);
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(date)}
-      className={[
-        "flex flex-col gap-1 p-2 rounded-lg text-left transition-all min-h-[90px] border",
-        inMonth ? "bg-white" : "bg-[#f8fafc]",
-        selected
-          ? "border-[#2563eb] ring-1 ring-[#2563eb]"
-          : "border-[#e2e8f0] hover:border-[#2563eb]/40",
-      ].join(" ")}
-    >
-      <span
-        className={[
-          "w-7 h-7 flex items-center justify-center rounded-full text-sm font-medium font-['Inter',sans-serif]",
-          today ? "bg-[#2563eb] text-white" : inMonth ? "text-[#0f172a]" : "text-[#cbd5e1]",
-        ].join(" ")}
-      >
-        {formatDate(date, "d")}
-      </span>
-      <div className="flex flex-col gap-0.5 w-full overflow-hidden">
-        {events.slice(0, 3).map((ev) => (
-          <span
-            key={ev.id}
-            className={`text-xs font-['Inter',sans-serif] font-medium px-1.5 py-0.5 rounded truncate text-white ${ev.color ?? "bg-[#2563eb]"}`}
-          >
-            {ev.title}
-          </span>
-        ))}
-        {events.length > 3 && (
-          <span className="text-xs text-[#64748b] font-['Inter',sans-serif] pl-1">
-            +{events.length - 3} more
-          </span>
-        )}
-      </div>
-    </button>
-  );
+function key(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 export default function CalendarPage() {
+  const { calendarId = "" } = useParams();
+  const calendar = scheduleStore.calendars().find((item) => item.id === calendarId);
   const [month, setMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selected, setSelected] = useState(key(new Date()));
+  const [events, setEvents] = useState(() => scheduleStore.events().filter((item) => item.calendarId === calendarId));
+  const [editing, setEditing] = useState<StoredEvent | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [start, setStart] = useState("09:00");
+  const [end, setEnd] = useState("10:00");
+  const days = useMemo(() => monthDays(month), [month]);
 
-  const events: CalendarEvent[] = [];
-
-  const start = startOfWeek(startOfMonth(month));
-  const end = endOfWeek(endOfMonth(month));
-  const days: Date[] = [];
-  let cur = start;
-  while (cur <= end) {
-    days.push(cur);
-    cur = addDays(cur, 1);
+  function openForm(event?: StoredEvent) {
+    setEditing(event ?? null);
+    setTitle(event?.title ?? "");
+    setStart(event?.start ?? "09:00");
+    setEnd(event?.end ?? "10:00");
+    if (event) setSelected(event.date);
+    setShowForm(true);
   }
 
-  const eventsOn = (d: Date) => events.filter((ev) => isSameDay(ev.date, d));
-  const selectedEvents = eventsOn(selectedDate);
+  function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!title.trim()) return;
+    const item: StoredEvent = { id: editing?.id ?? scheduleStore.id(), calendarId, title: title.trim(), date: selected, start, end };
+    const all = scheduleStore.events();
+    scheduleStore.saveEvents(editing ? all.map((value) => value.id === item.id ? item : value) : [...all, item]);
+    setEvents((current) => editing ? current.map((value) => value.id === item.id ? item : value) : [...current, item]);
+    setShowForm(false);
+  }
 
+  function remove(id: string) {
+    if (!confirm("Delete this event?")) return;
+    scheduleStore.saveEvents(scheduleStore.events().filter((item) => item.id !== id));
+    setEvents((current) => current.filter((item) => item.id !== id));
+  }
+
+  if (!calendar) return <main className="max-w-xl mx-auto py-20 text-center"><h1 className="text-2xl font-bold">Calendar not found</h1><Link to="/calendars" className="text-blue-600">Return to calendars</Link></main>;
+
+  const selectedEvents = events.filter((event) => event.date === selected).sort((a, b) => a.start.localeCompare(b.start));
   return (
-    <main className="min-h-screen flex-1 flex flex-col gap-5 px-10 py-6 bg-[#f8fafc]">
-      <title>Calendar | PeerSchedule</title>
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <h1 className="text-xl font-bold font-['Inter',sans-serif] text-[#0f172a]">
-            Calendar Name
-          </h1>
-          <div className="w-px h-6 bg-[#e2e8f0]" />
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMonth((m) => subMonths(m, 1))}
-              aria-label="Previous month"
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f1f5f9] text-[#0f172a] text-lg transition-colors"
-            >
-              ‹
-            </button>
-            <h2 className="w-44 text-center text-lg font-bold font-['Inter',sans-serif] text-[#0f172a]">
-              {formatDate(month, "MMMM yyyy")}
-            </h2>
-            <button
-              type="button"
-              onClick={() => setMonth((m) => addMonths(m, 1))}
-              aria-label="Next month"
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f1f5f9] text-[#0f172a] text-lg transition-colors"
-            >
-              ›
-            </button>
-          </div>
+    <main className="max-w-7xl mx-auto p-6">
+      <title>{calendar.name} | PeerSchedule</title>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div><h1 className="text-2xl font-bold">{calendar.name}</h1><p className="text-slate-500">{calendar.description}</p></div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1))} className="border rounded-lg px-3 py-2" aria-label="Previous month">‹</button>
+          <strong className="w-40 text-center">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
+          <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1))} className="border rounded-lg px-3 py-2" aria-label="Next month">›</button>
+          <button onClick={() => openForm()} className="bg-blue-600 text-white rounded-lg px-4 py-2">Add event</button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setMonth(new Date());
-            setSelectedDate(new Date());
-          }}
-          className="text-sm font-medium font-['Inter',sans-serif] text-[#2563eb] border border-[#2563eb] px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
-        >
-          Today
-        </button>
       </div>
-
-      <div className="flex gap-4">
-        <div className="flex-1 flex flex-col gap-1">
+      <div className="grid lg:grid-cols-[1fr_320px] gap-5">
+        <section className="bg-white border rounded-xl overflow-hidden">
+          <div className="grid grid-cols-7 bg-slate-100">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((day) => <div key={day} className="text-center text-xs font-semibold p-2">{day}</div>)}</div>
           <div className="grid grid-cols-7">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-              <div key={d} className="py-2 text-center text-xs font-medium font-['Inter',sans-serif] text-[#64748b]">
-                {d}
-              </div>
-            ))}
+            {days.map((day) => {
+              const date = key(day); const count = events.filter((event) => event.date === date).length;
+              return <button key={date} onClick={() => setSelected(date)} className={`min-h-24 border-t border-r p-2 text-left align-top ${selected === date ? "bg-blue-50 ring-2 ring-inset ring-blue-500" : ""} ${day.getMonth() !== month.getMonth() ? "text-slate-400 bg-slate-50" : ""}`}><span className="text-sm">{day.getDate()}</span>{count > 0 && <span className="block mt-2 text-xs bg-blue-600 text-white rounded px-2 py-1">{count} event{count === 1 ? "" : "s"}</span>}</button>;
+            })}
           </div>
-          <div className="grid grid-cols-7 gap-1">
-            {days.map((day) => (
-              <DayCell
-                key={day.toISOString()}
-                date={day}
-                currentMonth={month}
-                events={eventsOn(day)}
-                selected={isSameDay(day, selectedDate)}
-                onSelect={setSelectedDate}
-              />
-            ))}
-          </div>
-        </div>
-
-        <aside className="w-56 shrink-0">
-          <div className="bg-white border border-[#e2e8f0] rounded-xl p-4 flex flex-col gap-3">
-            <p className="text-sm font-semibold font-['Inter',sans-serif] text-[#0f172a]">
-              {formatDate(selectedDate, "EEEE, MMMM d")}
-            </p>
-            <div className="h-px bg-[#e2e8f0]" />
-
-            {selectedEvents.length === 0 ? (
-              <p className="text-xs text-[#64748b] font-['Inter',sans-serif]">No events.</p>
-            ) : (
-              selectedEvents.map((ev) => (
-                <div key={ev.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-50">
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${ev.color ?? "bg-[#2563eb]"}`} />
-                  <span className="text-xs font-medium font-['Inter',sans-serif] text-[#0f172a] truncate">
-                    {ev.title}
-                  </span>
-                </div>
-              ))
-            )}
-
-            <button className="mt-1 w-full text-xs font-medium font-['Inter',sans-serif] text-[#2563eb] border border-[#2563eb] rounded-lg py-1.5 hover:bg-blue-50 transition-colors">
-              + Add Event
-            </button>
+        </section>
+        <aside className="bg-white border rounded-xl p-4">
+          <h2 className="font-bold">{new Date(`${selected}T12:00`).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h2>
+          <div className="divide-y mt-3">
+            {selectedEvents.map((event) => <div key={event.id} className="py-3"><button onClick={() => openForm(event)} className="font-semibold text-left hover:text-blue-600">{event.title}</button><p className="text-sm text-slate-500">{event.start}–{event.end}</p><button onClick={() => remove(event.id)} className="text-xs text-red-600 mt-1">Delete</button></div>)}
+            {!selectedEvents.length && <p className="text-slate-500 py-5">No events this day.</p>}
           </div>
         </aside>
       </div>
+      {showForm && <div className="fixed inset-0 bg-black/40 grid place-items-center z-50"><form onSubmit={save} className="bg-white rounded-2xl p-6 w-[min(420px,calc(100%-2rem))] space-y-4"><h2 className="text-xl font-bold">{editing ? "Edit event" : "Add event"}</h2><label className="block text-sm font-semibold">Title<input required value={title} onChange={(e) => setTitle(e.target.value)} className="block w-full border rounded-lg px-3 py-2 mt-1" /></label><label className="block text-sm font-semibold">Date<input type="date" required value={selected} onChange={(e) => setSelected(e.target.value)} className="block w-full border rounded-lg px-3 py-2 mt-1" /></label><div className="grid grid-cols-2 gap-3"><label className="text-sm font-semibold">Start<input type="time" required value={start} onChange={(e) => setStart(e.target.value)} className="block w-full border rounded-lg px-3 py-2 mt-1" /></label><label className="text-sm font-semibold">End<input type="time" required min={start} value={end} onChange={(e) => setEnd(e.target.value)} className="block w-full border rounded-lg px-3 py-2 mt-1" /></label></div><div className="flex justify-end gap-2"><button type="button" onClick={() => setShowForm(false)} className="border rounded-lg px-4 py-2">Cancel</button><button className="bg-blue-600 text-white rounded-lg px-4 py-2">Save</button></div></form></div>}
     </main>
   );
 }

@@ -6,7 +6,7 @@
         "build": "react-router build",
         "dev": "react-router dev --host 0.0.0.0",
         "typecheck": "react-router typegen && tsc",
-        "lint": "eslint .",
+        "lint": "eslint src",
         "format": "prettier --write .",
         "check": "prettier --check ."
     },
