@@ -41,16 +41,33 @@ service cloud.firestore {
       allow create: if signedIn()
         && userId == currentUserId()
         && request.resource.data.uid == currentUserId()
-        && request.resource.data.role == "user";
+        && request.resource.data.role == "user"
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 2
+        && request.resource.data.displayName.size() <= 80
+        && request.resource.data.email is string
+        && request.resource.data.searchTokens is list;
 
-      // Authenticated users may search basic user profiles for friend and member lookup.
-      allow read: if signedIn();
+      allow get: if signedIn();
+      allow list: if isAdmin()
+        || (signedIn()
+          && request.query.limit != null
+          && request.query.limit <= 20);
 
       allow update: if isAdmin()
         || (signedIn()
           && userId == currentUserId()
           && request.resource.data.uid == resource.data.uid
-          && request.resource.data.role == resource.data.role);
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() >= 2
+          && request.resource.data.displayName.size() <= 80
+          && request.resource.data.email is string
+          && request.resource.data.searchTokens is list
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["displayName", "displayNameLower", "email", "emailLower",
+              "photoURL", "searchTokens", "updatedAt"]));
 
       allow delete: if isAdmin()
         || (signedIn()
@@ -61,14 +78,32 @@ service cloud.firestore {
     match /groups/{groupId} {
       allow create: if signedIn()
         && request.resource.data.ownerId == currentUserId()
+        && request.resource.data.memberIds is list
         && currentUserId() in request.resource.data.memberIds
-        && request.resource.data.name is string;
+        && request.resource.data.memberIds.size() == request.resource.data.memberIds.toSet().size()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 300
+        && request.resource.data.color is string;
 
       allow read: if isAdmin()
         || (signedIn() && currentUserId() in resource.data.memberIds);
 
       allow update: if isAdmin()
-        || (signedIn() && resource.data.ownerId == currentUserId())
+        || (signedIn()
+          && resource.data.ownerId == currentUserId()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.memberIds is list
+          && resource.data.ownerId in request.resource.data.memberIds
+          && request.resource.data.memberIds.size() == request.resource.data.memberIds.toSet().size()
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 2
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.description is string
+          && request.resource.data.description.size() <= 300
+          && request.resource.data.color is string)
         || (signedIn()
           && currentUserId() in resource.data.memberIds
           && resource.data.ownerId != currentUserId()
@@ -115,19 +150,56 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["participants", "participantIds", "updatedAt"])
           && request.resource.data.participants.diff(resource.data.participants)
-            .affectedKeys().hasOnly([currentUserId()]);
+            .affectedKeys().hasOnly([currentUserId()])
+          && request.resource.data.participantIds.toSet()
+            == request.resource.data.participants.keys().toSet()
+          && request.resource.data.participants[currentUserId()]
+            in ["accepted", "pending", "declined"];
+      }
+
+      function validRequestedEvent() {
+        return request.resource.data.title is string
+          && request.resource.data.title.size() >= 2
+          && request.resource.data.title.size() <= 120
+          && request.resource.data.description is string
+          && request.resource.data.description.size() <= 1000
+          && request.resource.data.location is string
+          && request.resource.data.location.size() <= 160
+          && request.resource.data.startTime is timestamp
+          && request.resource.data.endTime is timestamp
+          && request.resource.data.startTime < request.resource.data.endTime
+          && request.resource.data.type in ["meeting", "open_event", "blocked_time"]
+          && request.resource.data.visibility in ["full_details", "friends_only", "busy_only"]
+          && request.resource.data.participants is map
+          && request.resource.data.participants.values()
+            .hasOnly(["accepted", "pending", "declined"])
+          && request.resource.data.participants[request.resource.data.creatorId] == "accepted"
+          && request.resource.data.participantIds is list
+          && request.resource.data.participantIds.toSet()
+            == request.resource.data.participants.keys().toSet()
+          && request.resource.data.isRecurring is bool
+          && ((!request.resource.data.isRecurring
+              && !("recurrenceRule" in request.resource.data)
+              && !("recurrenceUntil" in request.resource.data)
+              && !("recurrenceSeriesId" in request.resource.data))
+            || (request.resource.data.isRecurring
+              && request.resource.data.recurrenceRule is string
+              && request.resource.data.recurrenceUntil is timestamp
+              && request.resource.data.recurrenceSeriesId is string));
       }
 
       allow create: if signedIn()
         && request.resource.data.creatorId == currentUserId()
-        && request.resource.data.title is string
-        && request.resource.data.startTime < request.resource.data.endTime
-        && request.resource.data.participantIds is list
+        && validRequestedEvent()
         && currentUserId() in request.resource.data.participantIds
         && (requestedCalendarId() == null || isCalendarMember(requestedCalendarId()));
 
       allow read: if canReadExistingEvent();
-      allow update: if canManageExistingEvent() || isOwnParticipantOnlyUpdate();
+      allow update: if (canManageExistingEvent()
+          && request.resource.data.creatorId == resource.data.creatorId
+          && request.resource.data.calendarId == resource.data.calendarId
+          && validRequestedEvent())
+        || isOwnParticipantOnlyUpdate();
       allow delete: if canManageExistingEvent();
     }
 
@@ -154,7 +226,15 @@ service cloud.firestore {
           || linkedEventAfter().creatorId == currentUserId()
           || isCalendarOwner(linkedEventAfter().calendarId))
         && request.resource.data.creatorId == linkedEventAfter().creatorId
-        && request.resource.data.calendarId == linkedEventAfter().calendarId;
+        && request.resource.data.calendarId == linkedEventAfter().calendarId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 2
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 1000
+        && request.resource.data.location is string
+        && request.resource.data.location.size() <= 160
+        && request.resource.data.viewerIds is list;
 
       allow read: if isAdmin()
         || (signedIn()
@@ -167,7 +247,21 @@ service cloud.firestore {
             || (resource.data.viewerIds is list
               && currentUserId() in resource.data.viewerIds)));
 
-      allow update, delete: if signedIn()
+      allow update: if signedIn()
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && canManageLinkedEvent()
+        && request.resource.data.creatorId == resource.data.creatorId
+        && request.resource.data.calendarId == resource.data.calendarId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 2
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 1000
+        && request.resource.data.location is string
+        && request.resource.data.location.size() <= 160
+        && request.resource.data.viewerIds is list;
+
+      allow delete: if signedIn()
         && exists(/databases/$(database)/documents/events/$(eventId))
         && canManageLinkedEvent();
     }
@@ -176,7 +270,12 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.senderId == currentUserId()
         && request.resource.data.receiverId != currentUserId()
-        && request.resource.data.status == "pending";
+        && request.resource.data.status == "pending"
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.keys()
+          .hasOnly(["senderId", "receiverId", "status", "createdAt"])
+        && (requestId == request.resource.data.senderId + "_" + request.resource.data.receiverId
+          || requestId == request.resource.data.receiverId + "_" + request.resource.data.senderId);
 
       allow read: if isAdmin()
         || (signedIn()

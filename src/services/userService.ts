@@ -8,24 +8,33 @@ import {
     getDoc,
     getDocs,
     limit,
-    orderBy,
     query,
     setDoc,
-    startAt,
     updateDoc,
     where,
 } from "firebase/firestore";
 
 const USERS_COLLECTION = "users";
+const MAX_SEARCH_TOKEN_LENGTH = 30;
 
-export const getUserById = async (
-    userId: string,
-): Promise<User | null> => {
-    const userReference = doc(
-        db,
-        USERS_COLLECTION,
-        userId,
-    );
+export const buildUserSearchTokens = (displayName: string, email: string): string[] => {
+    const values = [displayName.trim().toLowerCase(), email.trim().toLowerCase()];
+    const tokens = new Set<string>();
+
+    for (const value of values) {
+        for (let start = 0; start < value.length; start += 1) {
+            for (let length = 2; length <= Math.min(MAX_SEARCH_TOKEN_LENGTH, value.length - start); length += 1) {
+                tokens.add(value.slice(start, start + length));
+            }
+        }
+        if (value.length > MAX_SEARCH_TOKEN_LENGTH) tokens.add(value);
+    }
+
+    return [...tokens];
+};
+
+export const getUserById = async (userId: string): Promise<User | null> => {
+    const userReference = doc(db, USERS_COLLECTION, userId);
 
     const snapshot = await getDoc(userReference);
 
@@ -36,192 +45,95 @@ export const getUserById = async (
     return snapshot.data() as User;
 };
 
-export const getUsersByIds = async (
-    userIds: string[],
-): Promise<User[]> => {
+export const getUsersByIds = async (userIds: string[]): Promise<User[]> => {
     const uniqueUserIds = [...new Set(userIds)];
 
-    const users = await Promise.all(
-        uniqueUserIds.map((userId) =>
-            getUserById(userId),
-        ),
-    );
+    const users = await Promise.all(uniqueUserIds.map((userId) => getUserById(userId)));
 
-    return users.filter(
-        (user): user is User => user !== null,
-    );
+    return users.filter((user): user is User => user !== null);
 };
 
 export const getAllUsers = async (): Promise<User[]> => {
-    const usersReference = collection(
-        db,
-        USERS_COLLECTION,
-    );
+    const usersReference = collection(db, USERS_COLLECTION);
 
     const snapshot = await getDocs(usersReference);
 
-    return snapshot.docs.map(
-        (userDocument) =>
-            userDocument.data() as User,
-    );
+    return snapshot.docs.map((userDocument) => userDocument.data() as User);
 };
 
-export const getUsersByRole = async (
-    role: UserRole,
-): Promise<User[]> => {
-    const usersReference = collection(
-        db,
-        USERS_COLLECTION,
-    );
+export const getUsersByRole = async (role: UserRole): Promise<User[]> => {
+    const usersReference = collection(db, USERS_COLLECTION);
 
-    const usersQuery = query(
-        usersReference,
-        where("role", "==", role),
-    );
+    const usersQuery = query(usersReference, where("role", "==", role));
 
     const snapshot = await getDocs(usersQuery);
 
-    return snapshot.docs.map(
-        (userDocument) =>
-            userDocument.data() as User,
-    );
+    return snapshot.docs.map((userDocument) => userDocument.data() as User);
 };
 
-export const getUserByEmail = async (
-    email: string,
-): Promise<User | null> => {
-    const normalizedEmail = email
-        .trim()
-        .toLowerCase();
+export const getUserByEmail = async (email: string): Promise<User | null> => {
+    const normalizedEmail = email.trim().toLowerCase();
 
-    const usersReference = collection(
-        db,
-        USERS_COLLECTION,
-    );
+    const usersReference = collection(db, USERS_COLLECTION);
 
-    const usersQuery = query(
-        usersReference,
-        where("email", "==", normalizedEmail),
-    );
+    const usersQuery = query(usersReference, where("email", "==", normalizedEmail));
 
     const snapshot = await getDocs(usersQuery);
     const userDocument = snapshot.docs[0];
 
-    return userDocument
-        ? (userDocument.data() as User)
-        : null;
+    return userDocument ? (userDocument.data() as User) : null;
 };
 
-export const searchUsers = async (
-    searchText: string,
-    currentUserId: string,
-): Promise<User[]> => {
+export const searchUsers = async (searchText: string, currentUserId: string): Promise<User[]> => {
     const normalizedSearch = searchText.trim().toLowerCase();
 
     if (normalizedSearch.length < 2) {
         return [];
     }
 
-    const usersReference = collection(
-        db,
-        USERS_COLLECTION,
+    const usersQuery = query(
+        collection(db, USERS_COLLECTION),
+        where("searchTokens", "array-contains", normalizedSearch),
+        limit(20)
     );
+    const snapshot = await getDocs(usersQuery);
 
-    const emailQuery = query(
-        usersReference,
-        where("email", "==", normalizedSearch),
-        limit(5),
-    );
-
-    const nameQuery = query(
-        usersReference,
-        orderBy("displayNameLower"),
-        startAt(normalizedSearch),
-        limit(10),
-    );
-
-    const [emailSnapshot, nameSnapshot] = await Promise.all([
-        getDocs(emailQuery),
-        getDocs(nameQuery),
-    ]);
-
-    const results = new Map<string, User>();
-
-    for (const userDocument of [...emailSnapshot.docs, ...nameSnapshot.docs]) {
-        const user = userDocument.data() as User;
-        if (user.uid !== currentUserId) {
-            results.set(user.uid, user);
-        }
-    }
-
-    return [...results.values()].sort((first, second) =>
-        first.displayName.localeCompare(second.displayName),
-    );
+    return snapshot.docs
+        .map((userDocument) => userDocument.data() as User)
+        .filter((user) => user.uid !== currentUserId)
+        .sort((first, second) => first.displayName.localeCompare(second.displayName));
 };
 
-export const createUser = async (
-    user: User,
-): Promise<string> => {
-    const userReference = doc(
-        db,
-        USERS_COLLECTION,
-        user.uid,
-    );
+export const createUser = async (user: User): Promise<string> => {
+    const userReference = doc(db, USERS_COLLECTION, user.uid);
 
     await setDoc(userReference, {
         ...user,
         email: user.email.trim().toLowerCase(),
+        searchTokens: buildUserSearchTokens(user.displayName, user.email),
     });
 
     return user.uid;
 };
 
-export const updateUser = async (
-    userId: string,
-    updatedData: Partial<User>,
-): Promise<void> => {
-    const userReference = doc(
-        db,
-        USERS_COLLECTION,
-        userId,
-    );
+export const updateUser = async (userId: string, updatedData: Partial<User>): Promise<void> => {
+    const userReference = doc(db, USERS_COLLECTION, userId);
 
     await updateDoc(userReference, updatedData);
 };
 
-export const getUsersByFriendId = async (
-    friendId: string,
-): Promise<User[]> => {
-    const usersReference = collection(
-        db,
-        USERS_COLLECTION,
-    );
+export const getUsersByFriendId = async (friendId: string): Promise<User[]> => {
+    const usersReference = collection(db, USERS_COLLECTION);
 
-    const usersQuery = query(
-        usersReference,
-        where(
-            "friendIds",
-            "array-contains",
-            friendId,
-        ),
-    );
+    const usersQuery = query(usersReference, where("friendIds", "array-contains", friendId));
 
     const snapshot = await getDocs(usersQuery);
 
-    return snapshot.docs.map(
-        (userDocument) =>
-            userDocument.data() as User,
-    );
+    return snapshot.docs.map((userDocument) => userDocument.data() as User);
 };
 
-export const deleteUser = async (
-    userId: string,
-): Promise<void> => {
-    const userReference = doc(
-        db,
-        USERS_COLLECTION,
-        userId,
-    );
+export const deleteUser = async (userId: string): Promise<void> => {
+    const userReference = doc(db, USERS_COLLECTION, userId);
 
     await deleteDoc(userReference);
 };

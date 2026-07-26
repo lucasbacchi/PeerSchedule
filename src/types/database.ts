@@ -8,6 +8,7 @@ export interface User {
     displayNameLower: string;
     email: string;
     emailLower: string;
+    searchTokens?: string[];
     photoURL?: string;
     role: UserRole;
     /** Legacy field retained for compatibility. Accepted friend requests are authoritative. */
@@ -46,6 +47,8 @@ export interface CalendarEvent {
     participantIds: string[];
     isRecurring: boolean;
     recurrenceRule?: string;
+    recurrenceUntil?: Timestamp;
+    recurrenceSeriesId?: string;
     createdAt: Timestamp;
     updatedAt?: Timestamp;
     /** Set by the service layer; not stored in the public event document. */

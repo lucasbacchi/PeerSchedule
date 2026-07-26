@@ -3,7 +3,7 @@ import { GoogleAuthProvider, signInWithPopup, updateProfile } from "firebase/aut
 import { Timestamp } from "firebase/firestore";
 
 import { auth } from "@/lib/firebase";
-import { createUser, getUserById, updateUser } from "./userService";
+import { buildUserSearchTokens, createUser, getUserById, updateUser } from "./userService";
 
 const normalizeGoogleName = (displayName: string | null | undefined, email: string | null | undefined): string => {
     const trimmedName = displayName?.trim();
@@ -29,6 +29,7 @@ const buildCachedProfile = (firebaseUser: FirebaseUser) => {
         email,
         emailLower: email.toLowerCase(),
         photoURL: firebaseUser.photoURL ?? undefined,
+        searchTokens: buildUserSearchTokens(displayName, email),
     };
 };
 
@@ -54,7 +55,8 @@ export const signInWithGoogle = async (): Promise<FirebaseUser> => {
         const hasChanges =
             existingUser.displayName !== cachedProfile.displayName ||
             existingUser.email !== cachedProfile.email ||
-            existingUser.photoURL !== cachedProfile.photoURL;
+            existingUser.photoURL !== cachedProfile.photoURL ||
+            !existingUser.searchTokens;
 
         if (hasChanges) {
             await updateUser(firebaseUser.uid, cachedProfile);
@@ -80,6 +82,7 @@ export const updateSignedInUserProfile = async (displayName: string): Promise<vo
     await updateUser(currentUser.uid, {
         displayName: trimmedName,
         displayNameLower: trimmedName.toLowerCase(),
+        searchTokens: buildUserSearchTokens(trimmedName, currentUser.email ?? ""),
     });
 };
 

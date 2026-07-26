@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 
 interface ModalProps {
     title: string;
@@ -17,14 +17,50 @@ const sizeClasses: Record<NonNullable<ModalProps["size"]>, string> = {
 };
 
 export default function Modal({ title, isOpen, onClose, children, size = "md", closeDisabled = false }: ModalProps) {
+    const titleId = useId();
+    const dialogRef = useRef<HTMLElement>(null);
+    const onCloseRef = useRef(onClose);
+    const closeDisabledRef = useRef(closeDisabled);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+        closeDisabledRef.current = closeDisabled;
+    }, [closeDisabled, onClose]);
+
     useEffect(() => {
         if (!isOpen) {
             return undefined;
         }
 
+        const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const dialog = dialogRef.current;
+        const focusableSelector =
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        const focusableElements = dialog ? [...dialog.querySelectorAll<HTMLElement>(focusableSelector)] : [];
+        (focusableElements[0] ?? dialog)?.focus();
+
         const handleKeyDown = (event: KeyboardEvent): void => {
-            if (event.key === "Escape" && !closeDisabled) {
-                onClose();
+            if (event.key === "Escape" && !closeDisabledRef.current) {
+                onCloseRef.current();
+            }
+
+            if (event.key === "Tab" && dialog) {
+                const availableElements = [...dialog.querySelectorAll<HTMLElement>(focusableSelector)].filter(
+                    (element) => !element.hasAttribute("disabled")
+                );
+                const firstElement = availableElements[0];
+                const lastElement = availableElements.at(-1);
+
+                if (availableElements.length === 0) {
+                    event.preventDefault();
+                    dialog.focus();
+                } else if (event.shiftKey && document.activeElement === firstElement) {
+                    event.preventDefault();
+                    lastElement?.focus();
+                } else if (!event.shiftKey && document.activeElement === lastElement) {
+                    event.preventDefault();
+                    firstElement?.focus();
+                }
             }
         };
 
@@ -34,8 +70,9 @@ export default function Modal({ title, isOpen, onClose, children, size = "md", c
         return () => {
             document.removeEventListener("keydown", handleKeyDown);
             document.body.style.overflow = "";
+            previouslyFocused?.focus();
         };
-    }, [closeDisabled, isOpen, onClose]);
+    }, [isOpen]);
 
     if (!isOpen) {
         return null;
@@ -52,13 +89,15 @@ export default function Modal({ title, isOpen, onClose, children, size = "md", c
             }}
         >
             <section
+                ref={dialogRef}
                 role="dialog"
                 aria-modal="true"
-                aria-labelledby="modal-title"
+                aria-labelledby={titleId}
+                tabIndex={-1}
                 className={`max-h-[90vh] w-full overflow-y-auto rounded-2xl bg-white shadow-2xl ${sizeClasses[size]}`}
             >
                 <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-                    <h2 id="modal-title" className="text-xl font-bold text-slate-900">
+                    <h2 id={titleId} className="text-xl font-bold text-slate-900">
                         {title}
                     </h2>
                     <button

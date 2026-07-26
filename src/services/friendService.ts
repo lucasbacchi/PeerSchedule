@@ -1,6 +1,5 @@
 import {
     Timestamp,
-    addDoc,
     collection,
     deleteDoc,
     doc,
@@ -9,6 +8,7 @@ import {
     limit,
     query,
     runTransaction,
+    setDoc,
     updateDoc,
     where,
 } from "firebase/firestore";
@@ -96,14 +96,21 @@ export const sendFriendRequest = async (senderId: string, receiverId: string): P
         throw new Error("A friend request is already pending between these users.");
     }
 
-    const documentReference = await addDoc(collection(db, FRIEND_REQUESTS_COLLECTION), {
+    await Promise.all(
+        existingRequests
+            .filter((request) => request.status === "declined")
+            .map((request) => deleteDoc(doc(db, FRIEND_REQUESTS_COLLECTION, request.id)))
+    );
+
+    const requestId = [senderId, receiverId].sort().join("_");
+    await setDoc(doc(db, FRIEND_REQUESTS_COLLECTION, requestId), {
         senderId,
         receiverId,
         status: "pending" satisfies FriendRequestStatus,
         createdAt: Timestamp.now(),
     });
 
-    return documentReference.id;
+    return requestId;
 };
 
 export const respondToFriendRequest = async (

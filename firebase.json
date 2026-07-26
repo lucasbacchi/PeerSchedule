@@ -26,13 +26,5 @@
     },
     "storage": {
         "rules": "storage.rules"
-    },
-    "auth": {
-        "providers": {
-            "googleSignIn": {
-                "oAuthBrandDisplayName": "PeerSchedule",
-                "supportEmail": "lucasbacchi22@gmail.com"
-            }
-        }
     }
 }

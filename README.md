@@ -24,7 +24,7 @@ PeerSchedule is a peer-to-peer shared calendar web application built for COMP465
 - Protected application pages and sign-out
 - Create, list, edit, open, and delete shared calendars
 - Calendar ownership and member management
-- Responsive month calendar
+- Responsive month, week, and hourly day calendar views
 - Create, view, edit, and delete events
 - Meeting, open-event, and blocked-time event types
 - Full-details, friends-only, and busy-only UI visibility
@@ -35,6 +35,8 @@ PeerSchedule is a peer-to-peer shared calendar web application built for COMP465
 - Role-protected admin dashboard
 - Loading, empty, success, error, and confirmation states
 - Firestore Security Rules and index configuration
+- Recurring events with an end date and scoped series deletion
+- Indexed, limited user search by display-name or email fragment
 
 ## Project Setup
 
@@ -68,6 +70,7 @@ npm run dev       # Development server
 npm run build     # Production build
 npm run typecheck # React Router type generation and TypeScript checks
 npm run lint      # ESLint
+npm run test:rules # Firestore Security Rules emulator tests
 npm run format    # Prettier formatting
 npm run check     # Prettier validation
 ```
@@ -97,14 +100,52 @@ New accounts receive the `user` role. To create an administrator for development
 
 ## Testing
 
-Test with at least two Google accounts. See `TESTING.md` for the required manual test scenarios.
+Run the automated checks and test with at least two Google accounts. See
+[`TESTING.md`](TESTING.md) for the security suite and required multi-account scenarios.
 
 ## Known Limitations
 
-- Recurrence rules are stored but repeated event instances are not expanded into future dates yet.
 - Restricted event details are stored separately from public busy blocks. Friends-only viewer access is captured when the event is created or edited, so editing an older event refreshes its eligible friend list.
-- Adding calendar members currently uses an exact PeerSchedule email address.
+- Recurring event edits currently affect the selected occurrence; deletion supports one occurrence, following occurrences, or the complete series.
+- User search depends on `searchTokens`. Existing profiles receive these tokens the next time that user signs in.
 - Google Contacts and Google Calendar imports require separate OAuth scopes and are not part of the core project.
+
+## Architecture and Data Flow
+
+```mermaid
+flowchart LR
+    Browser[React + React Router] --> Auth[Firebase Authentication]
+    Browser --> Services[Typed service modules]
+    Services --> Rules[Firestore Security Rules]
+    Rules --> Users[(users)]
+    Rules --> Groups[(groups)]
+    Rules --> Events[(events)]
+    Rules --> Details[(eventDetails)]
+    Rules --> Friends[(friendRequests)]
+```
+
+Public scheduling blocks live in `events`. Restricted titles, descriptions, and locations live in
+`eventDetails`, whose viewer list is independently protected by Firestore Rules. React pages never issue raw
+Firestore calls; they use the service layer.
+
+Additional submission material:
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/WIREFRAMES.md`](docs/WIREFRAMES.md)
+- [`docs/REFLECTION.md`](docs/REFLECTION.md)
+- [`docs/screenshots/README.md`](docs/screenshots/README.md)
+
+## Deployment
+
+The configured Firebase project is `peer-schedule`. After running the checks, deploy with:
+
+```bash
+npm run build
+npx firebase-tools deploy --only hosting,firestore:rules,firestore:indexes,storage
+```
+
+Firebase Hosting normally serves this project at `https://peer-schedule.web.app`; confirm the active URL in
+the Firebase Console after deployment.
 
 ## Security
 
@@ -112,4 +153,7 @@ Do not commit private service-account files, passwords, or `.env` files. Firebas
 
 ## Academic Integrity and Credits
 
-Document external libraries, tutorials, templates, snippets, and AI-assisted work used by the group. Team members are responsible for understanding and being able to explain all submitted code.
+The project uses React, React Router, Tailwind CSS, Firebase, ESLint, Prettier, and Firebase Rules Unit
+Testing. AI-assisted development was used for implementation review, debugging, calendar UI refinement,
+security-rule hardening, and documentation. Team members are responsible for reviewing, understanding, and
+being able to explain all submitted code.

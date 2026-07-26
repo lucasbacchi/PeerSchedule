@@ -81,7 +81,7 @@ export default function AccountPage() {
     if (!profile) return <PageState title="Account unavailable" message={errorMessage ?? undefined} tone="error" />;
 
     return (
-        <main className="min-h-[calc(100dvh-66px)] bg-slate-50">
+        <main className="min-h-[calc(100dvh-4rem)] bg-slate-50">
             <title>Account | PeerSchedule</title>
             <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
                 <div>

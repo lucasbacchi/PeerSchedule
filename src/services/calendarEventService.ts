@@ -33,6 +33,7 @@ export interface CreateCalendarEventInput {
     detailViewerIds?: string[];
     isRecurring?: boolean;
     recurrenceRule?: string;
+    recurrenceUntil?: Timestamp;
 }
 
 export interface UpdateCalendarEventInput {
@@ -47,7 +48,10 @@ export interface UpdateCalendarEventInput {
     detailViewerIds?: string[];
     isRecurring?: boolean;
     recurrenceRule?: string;
+    recurrenceUntil?: Timestamp;
 }
+
+export type DeleteEventScope = "single" | "series" | "following";
 
 interface EventDetails {
     title: string;
@@ -58,6 +62,13 @@ interface EventDetails {
     visibility: Visibility;
     viewerIds: string[];
     updatedAt: Timestamp;
+}
+
+type RecurrenceFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
+
+interface EventInstancePayload {
+    publicEvent: Omit<CalendarEvent, "id" | "detailsAvailable" | "detailViewerIds">;
+    privateDetails: EventDetails;
 }
 
 const eventFromDocument = (id: string, data: Record<string, unknown>): CalendarEvent => {
@@ -89,6 +100,8 @@ const eventFromDocument = (id: string, data: Record<string, unknown>): CalendarE
             : Object.keys(participants),
         isRecurring: data.isRecurring === true,
         recurrenceRule: typeof data.recurrenceRule === "string" ? data.recurrenceRule : undefined,
+        recurrenceUntil: data.recurrenceUntil instanceof Timestamp ? data.recurrenceUntil : undefined,
+        recurrenceSeriesId: typeof data.recurrenceSeriesId === "string" ? data.recurrenceSeriesId : undefined,
         createdAt: data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.now(),
         updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt : undefined,
         detailsAvailable: data.visibility === "full_details",
@@ -166,25 +179,151 @@ const buildPublicFields = (
 ): Pick<CalendarEvent, "title" | "description" | "location"> =>
     visibility === "full_details" ? { title, description, location } : { title: "Busy", description: "", location: "" };
 
+const parseRecurrenceFrequency = (recurrenceRule: string): RecurrenceFrequency => {
+    const frequencyMatch = /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)$/i.exec(recurrenceRule.trim());
+
+    if (!frequencyMatch) {
+        throw new Error("Use a supported recurrence rule.");
+    }
+
+    return frequencyMatch[1].toUpperCase() as RecurrenceFrequency;
+};
+
+const addRecurrenceStep = (date: Date, frequency: RecurrenceFrequency): Date => {
+    const nextDate = new Date(date);
+
+    switch (frequency) {
+        case "DAILY":
+            nextDate.setDate(nextDate.getDate() + 1);
+            break;
+        case "WEEKLY":
+            nextDate.setDate(nextDate.getDate() + 7);
+            break;
+        case "MONTHLY":
+            nextDate.setMonth(nextDate.getMonth() + 1);
+            break;
+        case "YEARLY":
+            nextDate.setFullYear(nextDate.getFullYear() + 1);
+            break;
+    }
+
+    return nextDate;
+};
+
+const buildRecurringInstances = (
+    input: CreateCalendarEventInput,
+    publicFields: Pick<CalendarEvent, "title" | "description" | "location">,
+    seriesId = doc(collection(db, EVENTS_COLLECTION)).id
+): EventInstancePayload[] => {
+    const recurrenceRule = input.recurrenceRule?.trim() ?? "";
+    const frequency = parseRecurrenceFrequency(recurrenceRule);
+    const startDate = input.startTime.toDate();
+    const endDate = input.endTime.toDate();
+    const durationMs = endDate.getTime() - startDate.getTime();
+    const horizon = input.recurrenceUntil?.toDate();
+    if (!horizon || horizon < startDate) {
+        throw new Error("The recurrence end date must be on or after the event start date.");
+    }
+
+    const participants: Record<string, ParticipantStatus> = {
+        ...(input.participants ?? {}),
+        [input.creatorId]: "accepted",
+    };
+    const participantIds = Object.keys(participants);
+    const viewerIds = [...new Set([input.creatorId, ...participantIds, ...(input.detailViewerIds ?? [])])];
+    const createdAt = Timestamp.now();
+
+    const instances: EventInstancePayload[] = [];
+    let currentStart = new Date(startDate);
+
+    while (currentStart < horizon) {
+        const currentEnd = new Date(currentStart.getTime() + durationMs);
+
+        instances.push({
+            publicEvent: {
+                ...publicFields,
+                startTime: Timestamp.fromDate(new Date(currentStart)),
+                endTime: Timestamp.fromDate(currentEnd),
+                type: input.type,
+                calendarId: input.calendarId,
+                creatorId: input.creatorId,
+                visibility: input.visibility,
+                participants,
+                participantIds,
+                isRecurring: true,
+                recurrenceRule,
+                recurrenceUntil: input.recurrenceUntil,
+                recurrenceSeriesId: seriesId,
+                createdAt,
+                updatedAt: createdAt,
+            },
+            privateDetails: {
+                title: input.title.trim(),
+                description: input.description?.trim().slice(0, 1000) ?? "",
+                location: input.location?.trim().slice(0, 160) ?? "",
+                creatorId: input.creatorId,
+                calendarId: input.calendarId,
+                visibility: input.visibility,
+                viewerIds,
+                updatedAt: createdAt,
+            },
+        });
+
+        currentStart = addRecurrenceStep(currentStart, frequency);
+    }
+
+    return instances;
+};
+
+const persistEventInstances = async (instances: EventInstancePayload[]): Promise<void> => {
+    for (let start = 0; start < instances.length; start += 200) {
+        const batch = writeBatch(db);
+
+        for (const instance of instances.slice(start, start + 200)) {
+            const eventReference = doc(collection(db, EVENTS_COLLECTION));
+            batch.set(eventReference, instance.publicEvent);
+            batch.set(doc(db, EVENT_DETAILS_COLLECTION, eventReference.id), instance.privateDetails);
+        }
+
+        await batch.commit();
+    }
+};
+
 export const createEvent = async (input: CreateCalendarEventInput): Promise<CalendarEvent> => {
     validateEventTimes(input.startTime, input.endTime);
     const title = validateTitle(input.title);
     const description = input.description?.trim().slice(0, 1000) ?? "";
     const location = input.location?.trim().slice(0, 160) ?? "";
+    const publicFields = buildPublicFields(input.visibility, title, description, location);
+
+    if (input.isRecurring) {
+        if (!input.recurrenceRule?.trim()) {
+            throw new Error("A recurrence rule is required for recurring events.");
+        }
+
+        const recurringInstances = buildRecurringInstances(input, publicFields);
+        await persistEventInstances(recurringInstances);
+
+        const firstInstance = recurringInstances[0];
+        return {
+            id: "",
+            ...firstInstance.publicEvent,
+            title,
+            description,
+            location,
+            detailsAvailable: true,
+            detailViewerIds: firstInstance.privateDetails.viewerIds,
+        };
+    }
+
     const participants: Record<string, ParticipantStatus> = {
         ...(input.participants ?? {}),
         [input.creatorId]: "accepted",
     };
-
-    if (input.isRecurring && !input.recurrenceRule?.trim()) {
-        throw new Error("A recurrence rule is required for recurring events.");
-    }
-
-    const now = Timestamp.now();
-    const eventReference = doc(collection(db, EVENTS_COLLECTION));
     const participantIds = Object.keys(participants);
     const viewerIds = [...new Set([input.creatorId, ...participantIds, ...(input.detailViewerIds ?? [])])];
-    const publicFields = buildPublicFields(input.visibility, title, description, location);
+    const now = Timestamp.now();
+    const eventReference = doc(collection(db, EVENTS_COLLECTION));
 
     const publicEvent: Omit<CalendarEvent, "id" | "detailsAvailable" | "detailViewerIds"> = {
         ...publicFields,
@@ -196,8 +335,8 @@ export const createEvent = async (input: CreateCalendarEventInput): Promise<Cale
         visibility: input.visibility,
         participants,
         participantIds,
-        isRecurring: input.isRecurring ?? false,
-        recurrenceRule: input.isRecurring ? input.recurrenceRule?.trim() : undefined,
+        isRecurring: false,
+        recurrenceRule: undefined,
         createdAt: now,
         updatedAt: now,
     };
@@ -281,9 +420,14 @@ export const updateEvent = async (eventId: string, input: UpdateCalendarEventInp
     const nextParticipantIds = Object.keys(nextParticipants);
     const nextIsRecurring = input.isRecurring ?? existingEvent.isRecurring;
     const nextRule = input.recurrenceRule ?? existingEvent.recurrenceRule;
+    const nextRecurrenceUntil = input.recurrenceUntil ?? existingEvent.recurrenceUntil;
+    const nextRecurrenceSeriesId =
+        nextIsRecurring && !existingEvent.recurrenceSeriesId
+            ? doc(collection(db, EVENTS_COLLECTION)).id
+            : existingEvent.recurrenceSeriesId;
 
-    if (nextIsRecurring && !nextRule?.trim()) {
-        throw new Error("A recurrence rule is required for recurring events.");
+    if (nextIsRecurring && (!nextRule?.trim() || !nextRecurrenceUntil)) {
+        throw new Error("A recurrence rule and end date are required for recurring events.");
     }
 
     const now = Timestamp.now();
@@ -307,6 +451,8 @@ export const updateEvent = async (eventId: string, input: UpdateCalendarEventInp
         isRecurring: nextIsRecurring,
         updatedAt: now,
         recurrenceRule: nextIsRecurring ? nextRule?.trim() : deleteField(),
+        recurrenceUntil: nextIsRecurring ? nextRecurrenceUntil : deleteField(),
+        recurrenceSeriesId: nextIsRecurring ? nextRecurrenceSeriesId : deleteField(),
     };
 
     const detailsUpdate: EventDetails = {
@@ -324,13 +470,75 @@ export const updateEvent = async (eventId: string, input: UpdateCalendarEventInp
     batch.update(doc(db, EVENTS_COLLECTION, eventId), publicUpdate);
     batch.set(doc(db, EVENT_DETAILS_COLLECTION, eventId), detailsUpdate, { merge: true });
     await batch.commit();
+
+    if (!existingEvent.isRecurring && nextIsRecurring && nextRecurrenceUntil && nextRecurrenceSeriesId) {
+        const recurringInstances = buildRecurringInstances(
+            {
+                title: nextTitle,
+                description: nextDescription,
+                location: nextLocation,
+                startTime,
+                endTime,
+                type: input.type ?? existingEvent.type,
+                calendarId: existingEvent.calendarId,
+                creatorId: existingEvent.creatorId,
+                visibility: nextVisibility,
+                participants: nextParticipants,
+                detailViewerIds: viewerIds,
+                isRecurring: true,
+                recurrenceRule: nextRule,
+                recurrenceUntil: nextRecurrenceUntil,
+            },
+            publicFields,
+            nextRecurrenceSeriesId
+        );
+
+        await persistEventInstances(recurringInstances.slice(1));
+    }
 };
 
-export const deleteEvent = async (eventId: string): Promise<void> => {
-    const batch = writeBatch(db);
-    batch.delete(doc(db, EVENT_DETAILS_COLLECTION, eventId));
-    batch.delete(doc(db, EVENTS_COLLECTION, eventId));
-    await batch.commit();
+export const deleteEvent = async (eventId: string, scope: DeleteEventScope = "single"): Promise<void> => {
+    const selectedEvent = await getEventById(eventId);
+    if (!selectedEvent) return;
+
+    let eventIds = [eventId];
+
+    if (scope !== "single" && selectedEvent.isRecurring) {
+        const snapshot =
+            selectedEvent.calendarId === null
+                ? await getDocs(
+                      query(collection(db, EVENTS_COLLECTION), where("creatorId", "==", selectedEvent.creatorId))
+                  )
+                : await getDocs(
+                      query(collection(db, EVENTS_COLLECTION), where("calendarId", "==", selectedEvent.calendarId))
+                  );
+
+        eventIds = snapshot.docs
+            .filter((eventDocument) => {
+                const candidate = eventFromDocument(eventDocument.id, eventDocument.data());
+                const belongsToSeries = selectedEvent.recurrenceSeriesId
+                    ? candidate.recurrenceSeriesId === selectedEvent.recurrenceSeriesId
+                    : candidate.isRecurring &&
+                      candidate.creatorId === selectedEvent.creatorId &&
+                      candidate.createdAt.toMillis() === selectedEvent.createdAt.toMillis() &&
+                      candidate.recurrenceRule === selectedEvent.recurrenceRule;
+
+                return (
+                    belongsToSeries &&
+                    (scope === "series" || candidate.startTime.toMillis() >= selectedEvent.startTime.toMillis())
+                );
+            })
+            .map((eventDocument) => eventDocument.id);
+    }
+
+    for (let start = 0; start < eventIds.length; start += 225) {
+        const batch = writeBatch(db);
+        for (const id of eventIds.slice(start, start + 225)) {
+            batch.delete(doc(db, EVENT_DETAILS_COLLECTION, id));
+            batch.delete(doc(db, EVENTS_COLLECTION, id));
+        }
+        await batch.commit();
+    }
 };
 
 export const updateParticipantStatus = async (

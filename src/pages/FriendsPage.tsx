@@ -74,7 +74,7 @@ export default function FriendsPage() {
                 setErrorMessage(null);
                 const results = await searchUsers(searchText, user.uid);
                 setSearchResults(results);
-                if (results.length === 0) setMessage("No users matched that name or exact email address.");
+                if (results.length === 0) setMessage("No users matched that display name or email fragment.");
             } catch (error: unknown) {
                 setErrorMessage(error instanceof Error ? error.message : "Unable to search for users.");
             } finally {
@@ -117,7 +117,7 @@ export default function FriendsPage() {
     const pendingOutgoing = outgoing.filter((request) => request.status === "pending");
 
     return (
-        <main className="min-h-[calc(100dvh-66px)] bg-slate-50">
+        <main className="min-h-[calc(100dvh-4rem)] bg-slate-50">
             <title>Friends | PeerSchedule</title>
             <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
                 <div>
@@ -145,7 +145,7 @@ export default function FriendsPage() {
                 <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="text-xl font-black text-slate-950">Find a PeerSchedule user</h2>
                     <p className="mt-1 text-sm text-slate-500">
-                        Search by at least two letters of a display name or an exact email address.
+                        Search by at least two characters from a display name or email address.
                     </p>
                     <form onSubmit={handleSearch} className="mt-5 flex flex-col gap-3 sm:flex-row">
                         <label htmlFor="friend-search" className="sr-only">
@@ -157,7 +157,7 @@ export default function FriendsPage() {
                             onChange={(event) => setSearchText(event.target.value)}
                             minLength={2}
                             required
-                            placeholder="Name or exact email"
+                            placeholder="Name or part of an email"
                             className="flex-1 rounded-xl border border-slate-300 px-4 py-3 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                         />
                         <button

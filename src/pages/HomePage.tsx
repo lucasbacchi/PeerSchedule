@@ -39,7 +39,7 @@ export default function HomePage() {
     return (
         <main className="bg-gradient-to-b from-blue-50 via-white to-slate-50">
             <title>Home | PeerSchedule</title>
-            <section className="mx-auto grid min-h-[calc(100dvh-66px)] max-w-7xl items-center gap-12 px-4 py-12 lg:grid-cols-2 lg:px-8">
+            <section className="mx-auto grid min-h-[calc(100dvh-4rem)] max-w-7xl items-center gap-12 px-4 py-12 lg:grid-cols-2 lg:px-8">
                 <div>
                     <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">
                         Plan together without the scheduling chaos
@@ -81,7 +81,11 @@ export default function HomePage() {
                 <div className="relative mx-auto w-full max-w-lg">
                     <div className="absolute -inset-5 rounded-[2rem] bg-blue-200/50 blur-2xl" />
                     <div className="relative rounded-[2rem] border border-blue-100 bg-white p-8 shadow-xl">
-                        <img src={logo} alt="PeerSchedule logo" className="mx-auto h-28 w-28 object-contain" />
+                        <img
+                            src={logo}
+                            alt="PeerSchedule logo"
+                            className="mx-auto h-auto w-full max-w-sm object-contain mix-blend-multiply"
+                        />
                         <div className="mt-8 grid gap-4 sm:grid-cols-2">
                             {[
                                 ["Shared calendars", "Keep projects, clubs, and study groups organized."],
