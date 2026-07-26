@@ -297,5 +297,40 @@ service cloud.firestore {
           && (resource.data.senderId == currentUserId()
             || resource.data.receiverId == currentUserId()));
     }
+
+    match /timePolls/{pollId} {
+      allow create: if signedIn()
+        && request.resource.data.creatorId == currentUserId()
+        && isCalendarMember(request.resource.data.calendarId)
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 2
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.participantIds is list
+        && currentUserId() in request.resource.data.participantIds
+        && request.resource.data.options is list
+        && request.resource.data.options.size() >= 2
+        && request.resource.data.options.size() <= 12
+        && request.resource.data.status == "open";
+
+      allow read: if isAdmin()
+        || isCalendarMember(resource.data.calendarId);
+
+      allow update: if isAdmin()
+        || (signedIn()
+          && resource.data.creatorId == currentUserId()
+          && request.resource.data.creatorId == resource.data.creatorId
+          && request.resource.data.calendarId == resource.data.calendarId)
+        || (signedIn()
+          && currentUserId() in resource.data.participantIds
+          && resource.data.status == "open"
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["options", "updatedAt"])
+          && request.resource.data.options.size() == resource.data.options.size());
+
+      allow delete: if isAdmin()
+        || (signedIn()
+          && (resource.data.creatorId == currentUserId()
+            || isCalendarOwner(resource.data.calendarId)));
+    }
   }
 }

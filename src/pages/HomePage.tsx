@@ -13,7 +13,7 @@ export default function HomePage() {
     const handlePrimaryAction = (): void => {
         void (async () => {
             if (user) {
-                await navigate("/calendars");
+                await navigate("/plans");
                 return;
             }
 
@@ -22,7 +22,7 @@ export default function HomePage() {
                 setMessage(null);
                 const { signInWithGoogle } = await import("../services/authService");
                 await signInWithGoogle();
-                await navigate("/calendars", { replace: true });
+                await navigate("/plans", { replace: true });
             } catch (error: unknown) {
                 console.error("Google sign-in failed:", error);
                 setMessage(
@@ -45,11 +45,11 @@ export default function HomePage() {
                         Plan together without the scheduling chaos
                     </span>
                     <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-950 sm:text-6xl">
-                        Shared calendars built for peers.
+                        Find time together. Make the plan.
                     </h1>
                     <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-                        PeerSchedule helps groups share calendars, coordinate availability, invite participants, and
-                        manage meetings in one place.
+                        PeerSchedule helps friends, classmates, clubs, and teams compare availability without exposing
+                        private details—then choose a time and turn it into a plan.
                     </p>
                     <div className="mt-8 flex flex-wrap items-center gap-4">
                         <button
@@ -63,7 +63,7 @@ export default function HomePage() {
                                 : isSigningIn
                                   ? "Signing in..."
                                   : user
-                                    ? "Open my calendars"
+                                    ? "Open my plans"
                                     : "Sign in with Google"}
                         </button>
                         <span className="text-sm text-slate-500">No separate password required.</span>
@@ -88,10 +88,10 @@ export default function HomePage() {
                         />
                         <div className="mt-8 grid gap-4 sm:grid-cols-2">
                             {[
-                                ["Shared calendars", "Keep projects, clubs, and study groups organized."],
-                                ["Meeting invites", "Track pending, accepted, and declined responses."],
-                                ["Availability", "Share full details or show only that you are busy."],
-                                ["Friend connections", "Find other users and coordinate with trusted peers."],
+                                ["Shared availability", "See when your group is free without revealing private plans."],
+                                ["Time suggestions", "Find openings that work for everyone in a few clicks."],
+                                ["Simple voting", "Offer several times and let the group choose what works."],
+                                ["Peer groups", "Coordinate naturally with friends, classes, clubs, and teams."],
                             ].map(([title, description]) => (
                                 <article key={title} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                                     <h2 className="font-bold text-slate-900">{title}</h2>

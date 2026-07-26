@@ -4,6 +4,7 @@ import { Timestamp } from "firebase/firestore";
 
 import Modal from "@/components/common/Modal";
 import PageState from "@/components/common/PageState";
+import PersonPicker from "@/components/common/PersonPicker";
 import { useRequireAuth } from "@/hooks/useAuth";
 import {
     addCalendarMember,
@@ -22,8 +23,9 @@ import {
 } from "@/services/calendarEventService";
 import type { DeleteEventScope } from "@/services/calendarEventService";
 import { getFriends } from "@/services/friendService";
+import { closeTimePoll, createTimePoll, getTimePollsByCalendarId, setTimePollVote } from "@/services/timePollService";
 import { getUsersByIds, searchUsers } from "@/services/userService";
-import type { CalendarEvent, EventType, Group, ParticipantStatus, User, Visibility } from "@/types/database";
+import type { CalendarEvent, EventType, Group, ParticipantStatus, TimePoll, User, Visibility } from "@/types/database";
 
 interface EventFormState {
     title: string;
@@ -47,16 +49,21 @@ interface CalendarSettingsState {
 
 type CalendarView = "day" | "week" | "month";
 
+interface SuggestedTime {
+    start: Date;
+    end: Date;
+}
+
 const eventTypeLabels: Record<EventType, string> = {
-    meeting: "Meeting",
-    open_event: "Open event",
-    blocked_time: "Blocked time",
+    meeting: "Invite-only plan",
+    open_event: "Open plan",
+    blocked_time: "Busy time",
 };
 
 const visibilityLabels: Record<Visibility, string> = {
-    full_details: "Full details",
-    friends_only: "Friends only",
-    busy_only: "Busy only",
+    full_details: "Show details",
+    friends_only: "Friends can see details",
+    busy_only: "Show only that I’m busy",
 };
 
 const eventTypeClasses: Record<EventType, string> = {
@@ -166,7 +173,7 @@ export default function CalendarPage() {
         const now = new Date();
         return new Date(now.getFullYear(), now.getMonth(), 1);
     });
-    const [calendarView, setCalendarView] = useState<CalendarView>("month");
+    const [calendarView, setCalendarView] = useState<CalendarView>("week");
     const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
     const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
     const [isEventFormOpen, setIsEventFormOpen] = useState(false);
@@ -174,6 +181,19 @@ export default function CalendarPage() {
     const [eventToDelete, setEventToDelete] = useState<CalendarEvent | null>(null);
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isFindTimeOpen, setIsFindTimeOpen] = useState(false);
+    const [finderPersonIds, setFinderPersonIds] = useState<string[]>([]);
+    const [finderDuration, setFinderDuration] = useState(60);
+    const [finderStartDate, setFinderStartDate] = useState(() => toDateKey(new Date()));
+    const [finderEndDate, setFinderEndDate] = useState(() => {
+        const end = new Date();
+        end.setDate(end.getDate() + 7);
+        return toDateKey(end);
+    });
+    const [timePolls, setTimePolls] = useState<TimePoll[]>([]);
+    const [activeTimePoll, setActiveTimePoll] = useState<TimePoll | null>(null);
+    const [pollTitle, setPollTitle] = useState("");
+    const [selectedSuggestionKeys, setSelectedSuggestionKeys] = useState<string[]>([]);
     const [isCalendarDeleteConfirmOpen, setIsCalendarDeleteConfirmOpen] = useState(false);
     const [settings, setSettings] = useState<CalendarSettingsState>({ name: "", description: "", color: "#2563eb" });
     const [memberSearchText, setMemberSearchText] = useState("");
@@ -196,10 +216,11 @@ export default function CalendarPage() {
                 throw new Error("You are not a member of this calendar.");
             }
 
-            const [nextEvents, nextMembers, friends] = await Promise.all([
+            const [nextEvents, nextMembers, friends, nextTimePolls] = await Promise.all([
                 getEventsByCalendarId(calendarId),
                 getUsersByIds(nextCalendar.memberIds),
                 getFriends(user.uid),
+                getTimePollsByCalendarId(calendarId),
             ]);
 
             setCalendar(nextCalendar);
@@ -207,6 +228,7 @@ export default function CalendarPage() {
             setMembers(nextMembers);
             setFriends(friends);
             setFriendIds(new Set(friends.map((friend) => friend.uid)));
+            setTimePolls(nextTimePolls);
             setSettings({
                 name: nextCalendar.name,
                 description: nextCalendar.description ?? "",
@@ -270,6 +292,42 @@ export default function CalendarPage() {
 
     const visibleTitle = (event: CalendarEvent): string => (canSeeDetails(event) ? event.title : "Busy");
 
+    const suggestedTimes = useMemo<SuggestedTime[]>(() => {
+        if (!user || finderPersonIds.length === 0) return [];
+        const rangeStart = new Date(`${finderStartDate}T00:00:00`);
+        const rangeEnd = new Date(`${finderEndDate}T23:59:59`);
+        if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime()) || rangeEnd < rangeStart) return [];
+
+        const people = new Set([user.uid, ...finderPersonIds]);
+        const relevantEvents = events.filter((event) => {
+            if (people.has(event.creatorId)) return true;
+            return event.participantIds.some(
+                (participantId) => people.has(participantId) && event.participants[participantId] !== "declined"
+            );
+        });
+        const suggestions: SuggestedTime[] = [];
+        const cursor = new Date(rangeStart);
+
+        while (cursor <= rangeEnd && suggestions.length < 12) {
+            if (cursor.getDay() !== 0 && cursor.getDay() !== 6) {
+                for (let minutes = 8 * 60; minutes + finderDuration <= 20 * 60; minutes += 30) {
+                    const start = new Date(cursor);
+                    start.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+                    const end = new Date(start.getTime() + finderDuration * 60_000);
+                    const conflicts = relevantEvents.some(
+                        (event) =>
+                            event.startTime.toMillis() < end.getTime() && event.endTime.toMillis() > start.getTime()
+                    );
+                    if (!conflicts && start.getTime() >= currentTime) suggestions.push({ start, end });
+                    if (suggestions.length >= 12) break;
+                }
+            }
+            cursor.setDate(cursor.getDate() + 1);
+        }
+
+        return suggestions;
+    }, [currentTime, events, finderDuration, finderEndDate, finderPersonIds, finderStartDate, user]);
+
     const moveCalendar = (direction: -1 | 1): void => {
         setDisplayMonth((current) => {
             const next = new Date(current);
@@ -315,6 +373,103 @@ export default function CalendarPage() {
         setEventForm(eventToForm(event));
         setErrorMessage(null);
         setIsEventFormOpen(true);
+    };
+
+    const openSuggestedEvent = ({ start, end }: SuggestedTime, participantIds = finderPersonIds): void => {
+        const nextForm = createDefaultEventForm(start);
+        nextForm.startTime = toDateTimeLocal(start);
+        nextForm.endTime = toDateTimeLocal(end);
+        nextForm.participantIds = participantIds.filter((id) => id !== user?.uid);
+        setEditingEvent(null);
+        setEventForm(nextForm);
+        setIsFindTimeOpen(false);
+        setErrorMessage(null);
+        setIsEventFormOpen(true);
+    };
+
+    const handleCreateTimePoll = (): void => {
+        if (!user || !calendarId) return;
+        const options = suggestedTimes.filter((suggestion) =>
+            selectedSuggestionKeys.includes(suggestion.start.toISOString())
+        );
+        if (options.length < 2) {
+            setErrorMessage("Select at least two possible times for a vote.");
+            return;
+        }
+
+        void (async () => {
+            try {
+                setIsSaving(true);
+                await createTimePoll({
+                    calendarId,
+                    creatorId: user.uid,
+                    title: pollTitle,
+                    participantIds: finderPersonIds,
+                    options,
+                });
+                setIsFindTimeOpen(false);
+                setSuccessMessage("Time poll sent to the selected people.");
+                await loadCalendar();
+            } catch (error: unknown) {
+                setErrorMessage(error instanceof Error ? error.message : "Unable to create the time poll.");
+            } finally {
+                setIsSaving(false);
+            }
+        })();
+    };
+
+    const handlePollVote = (poll: TimePoll, optionId: string): void => {
+        if (!user) return;
+        const option = poll.options.find((candidate) => candidate.id === optionId);
+        if (!option) return;
+        const selected = !option.voterIds.includes(user.uid);
+        void (async () => {
+            try {
+                setIsSaving(true);
+                await setTimePollVote(poll.id, optionId, user.uid, selected);
+                const updatedPoll = {
+                    ...poll,
+                    options: poll.options.map((candidate) =>
+                        candidate.id === optionId
+                            ? {
+                                  ...candidate,
+                                  voterIds: selected
+                                      ? [...new Set([...candidate.voterIds, user.uid])]
+                                      : candidate.voterIds.filter((id) => id !== user.uid),
+                              }
+                            : candidate
+                    ),
+                };
+                setActiveTimePoll(updatedPoll);
+                setTimePolls((current) =>
+                    current.map((candidate) => (candidate.id === poll.id ? updatedPoll : candidate))
+                );
+            } catch (error: unknown) {
+                setErrorMessage(error instanceof Error ? error.message : "Unable to save your vote.");
+            } finally {
+                setIsSaving(false);
+            }
+        })();
+    };
+
+    const finalizeTimePoll = (poll: TimePoll, option: TimePoll["options"][number]): void => {
+        void (async () => {
+            try {
+                setIsSaving(true);
+                await closeTimePoll(poll.id);
+                setActiveTimePoll(null);
+                setTimePolls((current) => current.filter((candidate) => candidate.id !== poll.id));
+                openSuggestedEvent(
+                    { start: option.startTime.toDate(), end: option.endTime.toDate() },
+                    poll.participantIds
+                );
+                setEventForm((current) => ({ ...current, title: poll.title }));
+            } catch (error: unknown) {
+                setErrorMessage(error instanceof Error ? error.message : "Unable to finalize this time poll.");
+            } finally {
+                setIsSaving(false);
+            }
+        })();
     };
 
     const closeEventForm = (): void => {
@@ -546,7 +701,7 @@ export default function CalendarPage() {
             try {
                 setIsSaving(true);
                 await deleteCalendar(calendar.id);
-                await navigate("/calendars", { replace: true });
+                await navigate("/groups", { replace: true });
             } catch (error: unknown) {
                 setErrorMessage(error instanceof Error ? error.message : "Unable to delete the calendar.");
             } finally {
@@ -561,7 +716,7 @@ export default function CalendarPage() {
             try {
                 setIsSaving(true);
                 await removeCalendarMember(calendar.id, user.uid);
-                await navigate("/calendars", { replace: true });
+                await navigate("/groups", { replace: true });
             } catch (error: unknown) {
                 setErrorMessage(error instanceof Error ? error.message : "Unable to leave the calendar.");
             } finally {
@@ -594,8 +749,8 @@ export default function CalendarPage() {
                             style={{ backgroundColor: calendar.color ?? "#2563eb" }}
                         />
                         <div>
-                            <Link to="/calendars" className="text-sm font-bold text-blue-600 hover:text-blue-800">
-                                ← All calendars
+                            <Link to="/groups" className="text-sm font-bold text-blue-600 hover:text-blue-800">
+                                ← All groups
                             </Link>
                             <h1 className="mt-1 text-3xl font-black text-slate-950">{calendar.name}</h1>
                             <p className="mt-1 text-slate-600">
@@ -605,6 +760,18 @@ export default function CalendarPage() {
                         </div>
                     </div>
                     <div className="flex flex-wrap gap-3">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setFinderPersonIds([]);
+                                setSelectedSuggestionKeys([]);
+                                setPollTitle("");
+                                setIsFindTimeOpen(true);
+                            }}
+                            className="rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white hover:bg-emerald-700"
+                        >
+                            Find a time
+                        </button>
                         <button
                             type="button"
                             onClick={() => openNewEvent(new Date())}
@@ -933,6 +1100,33 @@ export default function CalendarPage() {
                             )}
                         </section>
                         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="flex items-center justify-between gap-3">
+                                <h2 className="text-lg font-black text-slate-900">Time votes</h2>
+                                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800">
+                                    {timePolls.length}
+                                </span>
+                            </div>
+                            {timePolls.length === 0 ? (
+                                <p className="mt-3 text-sm text-slate-500">No open time votes.</p>
+                            ) : (
+                                <div className="mt-3 space-y-2">
+                                    {timePolls.map((poll) => (
+                                        <button
+                                            key={poll.id}
+                                            type="button"
+                                            onClick={() => setActiveTimePoll(poll)}
+                                            className="w-full rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-left"
+                                        >
+                                            <span className="block font-bold text-emerald-950">{poll.title}</span>
+                                            <span className="mt-1 block text-xs text-emerald-800">
+                                                {poll.options.length} possible times
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+                        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                             <h2 className="text-lg font-black text-slate-900">Members</h2>
                             <div className="mt-4 space-y-3">
                                 {members.slice(0, 6).map((member) => (
@@ -965,7 +1159,207 @@ export default function CalendarPage() {
             </div>
 
             <Modal
-                title={editingEvent ? "Edit event" : "Create event"}
+                title={activeTimePoll?.title ?? "Choose a time"}
+                isOpen={activeTimePoll !== null}
+                onClose={() => setActiveTimePoll(null)}
+                size="md"
+                closeDisabled={isSaving}
+            >
+                {activeTimePoll ? (
+                    <div className="space-y-3">
+                        <p className="text-sm text-slate-600">
+                            Vote for every time that works for you. The organizer can then turn the best option into a
+                            plan.
+                        </p>
+                        {activeTimePoll.options.map((option) => {
+                            const voted = option.voterIds.includes(user.uid);
+                            return (
+                                <div
+                                    key={option.id}
+                                    className={`rounded-xl border p-4 ${
+                                        voted ? "border-emerald-400 bg-emerald-50" : "border-slate-200"
+                                    }`}
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => handlePollVote(activeTimePoll, option.id)}
+                                        disabled={isSaving}
+                                        className="w-full text-left"
+                                    >
+                                        <span className="block font-black">
+                                            {option.startTime.toDate().toLocaleString([], {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            })}
+                                        </span>
+                                        <span className="mt-1 block text-sm text-slate-600">
+                                            {option.voterIds.length} {option.voterIds.length === 1 ? "vote" : "votes"}
+                                            {voted ? " · Works for you" : ""}
+                                        </span>
+                                    </button>
+                                    {activeTimePoll.creatorId === user.uid ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => finalizeTimePoll(activeTimePoll, option)}
+                                            className="mt-3 text-sm font-bold text-blue-700"
+                                        >
+                                            Choose this time
+                                        </button>
+                                    ) : null}
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : null}
+            </Modal>
+
+            <Modal
+                title="Find a time together"
+                isOpen={isFindTimeOpen}
+                onClose={() => setIsFindTimeOpen(false)}
+                size="lg"
+            >
+                <div className="space-y-5">
+                    <section>
+                        <h3 className="font-black text-slate-900">1. Choose people</h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                            Suggestions use busy times visible in this group. Private details stay hidden.
+                        </p>
+                        <div className="mt-3">
+                            <PersonPicker
+                                people={members.filter((member) => member.uid !== user.uid)}
+                                selectedIds={finderPersonIds}
+                                onChange={setFinderPersonIds}
+                            />
+                        </div>
+                    </section>
+                    <section>
+                        <h3 className="font-black text-slate-900">2. Choose a range</h3>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                            <label className="text-sm font-bold text-slate-700">
+                                From
+                                <input
+                                    type="date"
+                                    value={finderStartDate}
+                                    onChange={(event) => setFinderStartDate(event.target.value)}
+                                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                                />
+                            </label>
+                            <label className="text-sm font-bold text-slate-700">
+                                Through
+                                <input
+                                    type="date"
+                                    value={finderEndDate}
+                                    min={finderStartDate}
+                                    onChange={(event) => setFinderEndDate(event.target.value)}
+                                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                                />
+                            </label>
+                            <label className="text-sm font-bold text-slate-700">
+                                Length
+                                <select
+                                    value={finderDuration}
+                                    onChange={(event) => setFinderDuration(Number(event.target.value))}
+                                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                                >
+                                    <option value={30}>30 minutes</option>
+                                    <option value={60}>1 hour</option>
+                                    <option value={90}>1½ hours</option>
+                                    <option value={120}>2 hours</option>
+                                </select>
+                            </label>
+                        </div>
+                    </section>
+                    <section>
+                        <h3 className="font-black text-slate-900">3. Pick a free time</h3>
+                        {finderPersonIds.length === 0 ? (
+                            <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+                                Select at least one person to see suggestions.
+                            </p>
+                        ) : suggestedTimes.length === 0 ? (
+                            <p className="mt-3 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
+                                No shared openings were found between 8 AM and 8 PM. Try a wider range or shorter plan.
+                            </p>
+                        ) : (
+                            <div className="mt-3 space-y-3">
+                                <input
+                                    value={pollTitle}
+                                    onChange={(event) => setPollTitle(event.target.value)}
+                                    placeholder="What are you planning?"
+                                    maxLength={120}
+                                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                                />
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                    {suggestedTimes.map((suggestion) => {
+                                        const key = suggestion.start.toISOString();
+                                        const selected = selectedSuggestionKeys.includes(key);
+                                        return (
+                                            <div
+                                                key={key}
+                                                className={`rounded-xl border p-3 ${
+                                                    selected ? "border-emerald-500 bg-emerald-50" : "border-slate-200"
+                                                }`}
+                                            >
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setSelectedSuggestionKeys((current) =>
+                                                            selected
+                                                                ? current.filter((value) => value !== key)
+                                                                : [...current, key]
+                                                        )
+                                                    }
+                                                    className="w-full text-left"
+                                                >
+                                                    <span className="block font-black text-emerald-900">
+                                                        {suggestion.start.toLocaleDateString([], {
+                                                            weekday: "short",
+                                                            month: "short",
+                                                            day: "numeric",
+                                                        })}
+                                                    </span>
+                                                    <span className="text-sm text-emerald-800">
+                                                        {suggestion.start.toLocaleTimeString([], {
+                                                            hour: "numeric",
+                                                            minute: "2-digit",
+                                                        })}
+                                                        {" – "}
+                                                        {suggestion.end.toLocaleTimeString([], {
+                                                            hour: "numeric",
+                                                            minute: "2-digit",
+                                                        })}
+                                                    </span>
+                                                    <span className="mt-1 block text-xs font-bold">
+                                                        {selected ? "Selected for vote" : "Select for vote"}
+                                                    </span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openSuggestedEvent(suggestion)}
+                                                    className="mt-2 text-xs font-bold text-blue-700"
+                                                >
+                                                    Plan this time now
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleCreateTimePoll}
+                                    disabled={selectedSuggestionKeys.length < 2 || isSaving}
+                                    className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-black text-white disabled:opacity-50"
+                                >
+                                    Send selected times for a vote
+                                </button>
+                            </div>
+                        )}
+                    </section>
+                </div>
+            </Modal>
+
+            <Modal
+                title={editingEvent ? "Edit plan" : "Create a plan"}
                 isOpen={isEventFormOpen}
                 onClose={closeEventForm}
                 size="lg"
@@ -1017,176 +1411,188 @@ export default function CalendarPage() {
                                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
                             />
                         </div>
-                        <div>
-                            <label htmlFor="event-type" className="block text-sm font-bold text-slate-700">
-                                Type
-                            </label>
-                            <select
-                                id="event-type"
-                                value={eventForm.type}
-                                onChange={(event) =>
-                                    setEventForm((current) => ({ ...current, type: event.target.value as EventType }))
-                                }
-                                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                            >
-                                {Object.entries(eventTypeLabels).map(([value, label]) => (
-                                    <option key={value} value={value}>
-                                        {label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label htmlFor="event-visibility" className="block text-sm font-bold text-slate-700">
-                                Visibility
-                            </label>
-                            <select
-                                id="event-visibility"
-                                value={eventForm.visibility}
-                                onChange={(event) =>
-                                    setEventForm((current) => ({
-                                        ...current,
-                                        visibility: event.target.value as Visibility,
-                                    }))
-                                }
-                                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                            >
-                                {Object.entries(visibilityLabels).map(([value, label]) => (
-                                    <option key={value} value={value}>
-                                        {label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="sm:col-span-2">
-                            <label htmlFor="event-location" className="block text-sm font-bold text-slate-700">
-                                Location
-                            </label>
-                            <input
-                                id="event-location"
-                                value={eventForm.location}
-                                onChange={(event) =>
-                                    setEventForm((current) => ({ ...current, location: event.target.value }))
-                                }
-                                maxLength={160}
-                                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                                placeholder="Room, building, or meeting link"
-                            />
-                        </div>
-                        <div className="sm:col-span-2">
-                            <label htmlFor="event-description" className="block text-sm font-bold text-slate-700">
-                                Description
-                            </label>
-                            <textarea
-                                id="event-description"
-                                value={eventForm.description}
-                                onChange={(event) =>
-                                    setEventForm((current) => ({ ...current, description: event.target.value }))
-                                }
-                                maxLength={1000}
-                                rows={4}
-                                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                            />
-                        </div>
-                    </div>
-
-                    <fieldset className="rounded-xl border border-slate-200 p-4">
-                        <legend className="px-2 text-sm font-bold text-slate-700">Participants</legend>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                            {members
-                                .filter((member) => member.uid !== user.uid)
-                                .map((member) => (
-                                    <label
-                                        key={member.uid}
-                                        className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={eventForm.participantIds.includes(member.uid)}
-                                            onChange={(event) =>
-                                                setEventForm((current) => ({
-                                                    ...current,
-                                                    participantIds: event.target.checked
-                                                        ? [...current.participantIds, member.uid]
-                                                        : current.participantIds.filter((id) => id !== member.uid),
-                                                }))
-                                            }
-                                            className="h-4 w-4"
-                                        />
-                                        <span className="text-sm font-semibold text-slate-700">
-                                            {member.displayName}
-                                        </span>
-                                    </label>
-                                ))}
-                        </div>
-                    </fieldset>
-
-                    <div className="rounded-xl border border-slate-200 p-4">
-                        <label className="flex items-center gap-3 font-bold text-slate-700">
-                            <input
-                                type="checkbox"
-                                checked={eventForm.isRecurring}
-                                onChange={(event) =>
-                                    setEventForm((current) => ({ ...current, isRecurring: event.target.checked }))
-                                }
-                                className="h-4 w-4"
-                            />
-                            Recurring event
-                        </label>
-                        {eventForm.isRecurring ? (
-                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <details className="sm:col-span-2 rounded-xl border border-slate-200 p-4">
+                            <summary className="cursor-pointer font-black text-slate-800">More options</summary>
+                            <div className="mt-4 grid gap-5 sm:grid-cols-2">
                                 <div>
-                                    <label
-                                        htmlFor="recurrence-frequency"
-                                        className="block text-xs font-bold text-slate-600"
-                                    >
-                                        Repeats
+                                    <label htmlFor="event-type" className="block text-sm font-bold text-slate-700">
+                                        Type
                                     </label>
                                     <select
-                                        id="recurrence-frequency"
-                                        value={eventForm.recurrenceRule}
+                                        id="event-type"
+                                        value={eventForm.type}
                                         onChange={(event) =>
-                                            setEventForm((current) => ({
-                                                ...current,
-                                                recurrenceRule: event.target.value,
-                                            }))
+                                            setEventForm((current) => {
+                                                const type = event.target.value as EventType;
+                                                return {
+                                                    ...current,
+                                                    type,
+                                                    participantIds:
+                                                        type === "blocked_time" ? [] : current.participantIds,
+                                                    visibility:
+                                                        type === "blocked_time" ? "busy_only" : current.visibility,
+                                                };
+                                            })
                                         }
-                                        className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
                                     >
-                                        <option value="FREQ=DAILY">Daily</option>
-                                        <option value="FREQ=WEEKLY">Weekly</option>
-                                        <option value="FREQ=MONTHLY">Monthly</option>
-                                        <option value="FREQ=YEARLY">Yearly</option>
+                                        {Object.entries(eventTypeLabels).map(([value, label]) => (
+                                            <option key={value} value={value}>
+                                                {label}
+                                            </option>
+                                        ))}
                                     </select>
                                 </div>
                                 <div>
                                     <label
-                                        htmlFor="recurrence-until"
-                                        className="block text-xs font-bold text-slate-600"
+                                        htmlFor="event-visibility"
+                                        className="block text-sm font-bold text-slate-700"
                                     >
-                                        Ends on
+                                        Visibility
                                     </label>
-                                    <input
-                                        id="recurrence-until"
-                                        type="date"
-                                        value={eventForm.recurrenceUntil}
-                                        min={eventForm.startTime.slice(0, 10)}
+                                    <select
+                                        id="event-visibility"
+                                        value={eventForm.visibility}
                                         onChange={(event) =>
                                             setEventForm((current) => ({
                                                 ...current,
-                                                recurrenceUntil: event.target.value,
+                                                visibility: event.target.value as Visibility,
                                             }))
                                         }
-                                        required
-                                        className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                                    >
+                                        {Object.entries(visibilityLabels).map(([value, label]) => (
+                                            <option key={value} value={value}>
+                                                {label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="sm:col-span-2">
+                                    <label htmlFor="event-location" className="block text-sm font-bold text-slate-700">
+                                        Location
+                                    </label>
+                                    <input
+                                        id="event-location"
+                                        value={eventForm.location}
+                                        onChange={(event) =>
+                                            setEventForm((current) => ({ ...current, location: event.target.value }))
+                                        }
+                                        maxLength={160}
+                                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                                        placeholder="Room, building, or meeting link"
+                                    />
+                                </div>
+                                <div className="sm:col-span-2">
+                                    <label
+                                        htmlFor="event-description"
+                                        className="block text-sm font-bold text-slate-700"
+                                    >
+                                        Description
+                                    </label>
+                                    <textarea
+                                        id="event-description"
+                                        value={eventForm.description}
+                                        onChange={(event) =>
+                                            setEventForm((current) => ({ ...current, description: event.target.value }))
+                                        }
+                                        maxLength={1000}
+                                        rows={4}
+                                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
                                     />
                                 </div>
                             </div>
-                        ) : null}
-                        <p className="mt-2 text-xs text-slate-500">
-                            Recurring events are added through the selected end date.
-                        </p>
+                        </details>
                     </div>
+
+                    {eventForm.type !== "blocked_time" ? (
+                        <fieldset className="rounded-xl border border-slate-200 p-4">
+                            <legend className="px-2 text-sm font-bold text-slate-700">Who is joining?</legend>
+                            <PersonPicker
+                                people={members.filter((member) => member.uid !== user.uid)}
+                                selectedIds={eventForm.participantIds}
+                                onChange={(participantIds) =>
+                                    setEventForm((current) => ({ ...current, participantIds }))
+                                }
+                                disabled={isSaving}
+                                emptyMessage="Add friends to this group before inviting them."
+                            />
+                        </fieldset>
+                    ) : (
+                        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                            Blocked time is private by default. Other group members will only see that you are busy.
+                        </div>
+                    )}
+
+                    <details className="rounded-xl border border-slate-200 p-4">
+                        <summary className="cursor-pointer font-black text-slate-800">Repeat this plan</summary>
+                        <div className="mt-4">
+                            <label className="flex items-center gap-3 font-bold text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={eventForm.isRecurring}
+                                    onChange={(event) =>
+                                        setEventForm((current) => ({ ...current, isRecurring: event.target.checked }))
+                                    }
+                                    className="h-4 w-4"
+                                />
+                                Recurring event
+                            </label>
+                            {eventForm.isRecurring ? (
+                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                    <div>
+                                        <label
+                                            htmlFor="recurrence-frequency"
+                                            className="block text-xs font-bold text-slate-600"
+                                        >
+                                            Repeats
+                                        </label>
+                                        <select
+                                            id="recurrence-frequency"
+                                            value={eventForm.recurrenceRule}
+                                            onChange={(event) =>
+                                                setEventForm((current) => ({
+                                                    ...current,
+                                                    recurrenceRule: event.target.value,
+                                                }))
+                                            }
+                                            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                                        >
+                                            <option value="FREQ=DAILY">Daily</option>
+                                            <option value="FREQ=WEEKLY">Weekly</option>
+                                            <option value="FREQ=MONTHLY">Monthly</option>
+                                            <option value="FREQ=YEARLY">Yearly</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="recurrence-until"
+                                            className="block text-xs font-bold text-slate-600"
+                                        >
+                                            Ends on
+                                        </label>
+                                        <input
+                                            id="recurrence-until"
+                                            type="date"
+                                            value={eventForm.recurrenceUntil}
+                                            min={eventForm.startTime.slice(0, 10)}
+                                            onChange={(event) =>
+                                                setEventForm((current) => ({
+                                                    ...current,
+                                                    recurrenceUntil: event.target.value,
+                                                }))
+                                            }
+                                            required
+                                            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                                        />
+                                    </div>
+                                </div>
+                            ) : null}
+                            <p className="mt-2 text-xs text-slate-500">
+                                Recurring events are added through the selected end date.
+                            </p>
+                        </div>
+                    </details>
 
                     {errorMessage ? (
                         <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
@@ -1308,7 +1714,7 @@ export default function CalendarPage() {
                                             disabled={isSaving}
                                             className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold capitalize text-slate-700 hover:bg-slate-50"
                                         >
-                                            {status}
+                                            {status === "pending" ? "Maybe" : status}
                                         </button>
                                     ))}
                                     {selectedEvent.type === "open_event" && selectedEvent.creatorId !== user.uid ? (

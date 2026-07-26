@@ -82,11 +82,11 @@ export default function AccountPage() {
 
     return (
         <main className="min-h-[calc(100dvh-4rem)] bg-slate-50">
-            <title>Account | PeerSchedule</title>
+            <title>Profile | PeerSchedule</title>
             <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
                 <div>
                     <p className="text-sm font-bold uppercase tracking-wide text-blue-600">Profile and settings</p>
-                    <h1 className="mt-1 text-3xl font-black text-slate-950">Account management</h1>
+                    <h1 className="mt-1 text-3xl font-black text-slate-950">Your profile</h1>
                     <p className="mt-2 text-slate-600">
                         View your Google account information and update your PeerSchedule display name.
                     </p>

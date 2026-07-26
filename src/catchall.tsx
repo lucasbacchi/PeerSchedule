@@ -9,7 +9,7 @@ export default function CatchAll() {
                 <h1 className="mt-2 text-3xl font-black text-slate-950">Page not found</h1>
                 <p className="mt-3 text-slate-600">The page may have moved, or the address may be incorrect.</p>
                 <Link
-                    to="/calendars"
+                    to="/plans"
                     className="mt-6 inline-flex rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700"
                 >
                     Return to calendars

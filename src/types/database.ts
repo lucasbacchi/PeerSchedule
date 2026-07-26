@@ -67,3 +67,22 @@ export interface FriendRequest {
     createdAt: Timestamp;
     respondedAt?: Timestamp;
 }
+
+export interface TimePollOption {
+    id: string;
+    startTime: Timestamp;
+    endTime: Timestamp;
+    voterIds: string[];
+}
+
+export interface TimePoll {
+    id: string;
+    calendarId: string;
+    creatorId: string;
+    title: string;
+    participantIds: string[];
+    options: TimePollOption[];
+    status: "open" | "closed";
+    createdAt: Timestamp;
+    updatedAt?: Timestamp;
+}

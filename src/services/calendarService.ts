@@ -21,6 +21,7 @@ import type { Group } from "@/types/database";
 const GROUPS_COLLECTION = "groups";
 const EVENTS_COLLECTION = "events";
 const EVENT_DETAILS_COLLECTION = "eventDetails";
+const TIME_POLLS_COLLECTION = "timePolls";
 
 export interface CreateCalendarInput {
     name: string;
@@ -171,6 +172,16 @@ export const deleteCalendar = async (calendarId: string): Promise<void> => {
         for (const eventDocument of eventDocuments.slice(start, start + 225)) {
             batch.delete(doc(db, EVENT_DETAILS_COLLECTION, eventDocument.id));
             batch.delete(eventDocument.ref);
+        }
+        await batch.commit();
+    }
+
+    const pollsQuery = query(collection(db, TIME_POLLS_COLLECTION), where("calendarId", "==", calendarId));
+    const pollSnapshot = await getDocs(pollsQuery);
+    for (let start = 0; start < pollSnapshot.docs.length; start += 450) {
+        const batch = writeBatch(db);
+        for (const pollDocument of pollSnapshot.docs.slice(start, start + 450)) {
+            batch.delete(pollDocument.ref);
         }
         await batch.commit();
     }

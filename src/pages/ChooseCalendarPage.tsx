@@ -133,12 +133,12 @@ export default function ChooseCalendarPage() {
 
     return (
         <main className="min-h-[calc(100dvh-4rem)] bg-slate-50">
-            <title>Choose Calendar | PeerSchedule</title>
+            <title>Groups | PeerSchedule</title>
             <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
                 <section className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                         <p className="text-sm font-bold uppercase tracking-wide text-blue-600">Your workspace</p>
-                        <h1 className="mt-1 text-3xl font-black text-slate-950 sm:text-4xl">Choose a calendar</h1>
+                        <h1 className="mt-1 text-3xl font-black text-slate-950 sm:text-4xl">Your groups</h1>
                         <p className="mt-3 max-w-2xl text-slate-600">
                             Open a calendar shared with you, or create a new one for a team, class, club, or friend
                             group.
@@ -149,7 +149,7 @@ export default function ChooseCalendarPage() {
                         onClick={openCreateForm}
                         className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white shadow-sm hover:bg-blue-700"
                     >
-                        + Create calendar
+                        + Create group
                     </button>
                 </section>
 
@@ -172,16 +172,16 @@ export default function ChooseCalendarPage() {
                         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-3xl text-blue-700">
                             ⌘
                         </div>
-                        <h2 className="mt-5 text-2xl font-bold text-slate-900">No calendars yet</h2>
+                        <h2 className="mt-5 text-2xl font-bold text-slate-900">No groups yet</h2>
                         <p className="mx-auto mt-2 max-w-md text-slate-600">
-                            Create your first shared calendar to begin adding events and inviting members.
+                            Create your first group to compare availability and start making plans.
                         </p>
                         <button
                             type="button"
                             onClick={openCreateForm}
                             className="mt-6 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700"
                         >
-                            Create your first calendar
+                            Create your first group
                         </button>
                     </section>
                 ) : (
@@ -221,10 +221,10 @@ export default function ChooseCalendarPage() {
 
                                         <div className="mt-6 flex flex-wrap gap-2">
                                             <Link
-                                                to={`/calendars/${calendar.id}`}
+                                                to={`/groups/${calendar.id}`}
                                                 className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-center font-bold text-white hover:bg-blue-700"
                                             >
-                                                Open calendar
+                                                Open group
                                             </Link>
                                             {isOwner ? (
                                                 <>
@@ -254,7 +254,7 @@ export default function ChooseCalendarPage() {
             </div>
 
             <Modal
-                title={editingCalendar ? "Edit calendar" : "Create calendar"}
+                title={editingCalendar ? "Edit group" : "Create group"}
                 isOpen={isFormOpen}
                 onClose={closeForm}
                 closeDisabled={isSaving}
@@ -262,7 +262,7 @@ export default function ChooseCalendarPage() {
                 <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
                         <label htmlFor="calendar-name" className="block text-sm font-bold text-slate-700">
-                            Calendar name
+                            Group name
                         </label>
                         <input
                             id="calendar-name"

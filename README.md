@@ -2,6 +2,9 @@
 
 PeerSchedule is a peer-to-peer shared calendar web application built for COMP4650 Web Development. Users sign in with Google, create or join calendars, manage events, connect with friends, invite participants, and share availability.
 
+Its product direction is coordination-first: choose people, see shared free time, pick or vote on a time, and
+turn that availability into a plan.
+
 ## Team
 
 - Zane Costello — Project management and UI/UX design
@@ -25,6 +28,9 @@ PeerSchedule is a peer-to-peer shared calendar web application built for COMP465
 - Create, list, edit, open, and delete shared calendars
 - Calendar ownership and member management
 - Responsive month, week, and hourly day calendar views
+- Plans dashboard with upcoming plans and unanswered invitations
+- Group common-time suggestions using privacy-safe busy blocks
+- Multi-option time polls and participant voting
 - Create, view, edit, and delete events
 - Meeting, open-event, and blocked-time event types
 - Full-details, friends-only, and busy-only UI visibility
@@ -78,8 +84,9 @@ npm run check     # Prettier validation
 ## Main Routes
 
 - `/` — Public home and Google sign-in
-- `/calendars` — Calendar selection and management
-- `/calendars/:calendarId` — Calendar, events, and membership
+- `/plans` — Upcoming plans, invitations, and primary actions
+- `/groups` — Group selection and management
+- `/groups/:calendarId` — Availability, plans, time voting, and membership
 - `/friends` — Friend management
 - `/account` — Account management
 - `/admin` — Administrator-only dashboard
@@ -91,6 +98,7 @@ npm run check     # Prettier validation
 - `events` (public schedule blocks)
 - `eventDetails` (protected titles, descriptions, and locations)
 - `friendRequests`
+- `timePolls`
 
 User documents use the Firebase Authentication UID as the Firestore document ID. Existing early-development user documents with generated IDs are migrated when the user signs in.
 

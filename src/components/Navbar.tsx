@@ -62,15 +62,11 @@ export default function Navbar() {
         <header className="sticky top-0 z-40 h-16 w-full border-b border-slate-200 bg-white shadow-sm">
             <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-4">
                 <NavLink
-                    to={user ? "/calendars" : "/"}
+                    to={user ? "/plans" : "/"}
                     className="flex min-w-0 items-center"
                     aria-label="PeerSchedule home"
                 >
-                    <img
-                        src={logo}
-                        alt=""
-                        className="h-11 w-auto max-w-[12rem] object-contain sm:h-12"
-                    />
+                    <img src={logo} alt="" className="h-11 w-auto max-w-[12rem] object-contain sm:h-12" />
                 </NavLink>
 
                 {!isLoading && user ? (
@@ -93,14 +89,17 @@ export default function Navbar() {
                         } absolute left-0 right-0 top-full flex-col gap-2 border-b border-slate-200 bg-white p-4 shadow-lg md:static md:flex md:flex-row md:items-center md:border-0 md:p-0 md:shadow-none`}
                     >
                         <nav aria-label="Main navigation" className="flex flex-col gap-1 md:flex-row md:items-center">
-                            <NavLink to="/calendars" className={linkClasses}>
-                                Calendars
+                            <NavLink to="/plans" className={linkClasses}>
+                                Plans
+                            </NavLink>
+                            <NavLink to="/groups" className={linkClasses}>
+                                Groups
                             </NavLink>
                             <NavLink to="/friends" className={linkClasses}>
                                 Friends
                             </NavLink>
                             <NavLink to="/account" className={linkClasses}>
-                                Account
+                                Profile
                             </NavLink>
                             {profile?.role === "admin" ? (
                                 <NavLink to="/admin" className={linkClasses}>

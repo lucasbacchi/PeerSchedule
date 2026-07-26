@@ -157,3 +157,40 @@ test("user directory searches must be constrained and limited", async () => {
     );
     await assertFails(getDocs(collection(database, "users")));
 });
+
+test("members can create time polls and outsiders cannot", async () => {
+    const poll = {
+        calendarId: "calendar",
+        creatorId: "member",
+        title: "Project planning",
+        participantIds: ["member", "owner"],
+        options: [
+            {
+                id: "1",
+                startTime: Timestamp.fromMillis(3_000_000),
+                endTime: Timestamp.fromMillis(3_060_000),
+                voterIds: ["member"],
+            },
+            {
+                id: "2",
+                startTime: Timestamp.fromMillis(4_000_000),
+                endTime: Timestamp.fromMillis(4_060_000),
+                voterIds: ["member"],
+            },
+        ],
+        status: "open",
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+    };
+    const memberDatabase = testEnvironment.authenticatedContext("member").firestore();
+    await assertSucceeds(setDoc(doc(memberDatabase, "timePolls", "member-poll"), poll));
+
+    const outsiderDatabase = testEnvironment.authenticatedContext("outsider").firestore();
+    await assertFails(
+        setDoc(doc(outsiderDatabase, "timePolls", "outsider-poll"), {
+            ...poll,
+            creatorId: "outsider",
+            participantIds: ["outsider"],
+        })
+    );
+});
