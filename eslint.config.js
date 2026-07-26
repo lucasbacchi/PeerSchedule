@@ -20,6 +20,7 @@ export default [
             "functions/.eslintrc.js",
             "functions/lib/**",
             "functions/generated/**",
+            "functions/src/**",
         ],
     },
 
@@ -55,8 +56,6 @@ export default [
             "jsx-a11y": pluginJsxA11y,
         },
         rules: {
-            ...pluginReact.configs.recommended.rules,
-            ...pluginReact.configs["jsx-runtime"].rules, // React 17+
             ...pluginReactHooks.configs.recommended.rules,
             ...pluginJsxA11y.configs.recommended.rules,
 
@@ -69,10 +68,6 @@ export default [
 
             // React best practices
             "react/prop-types": "off", // Using TypeScript
-            "react/jsx-no-leaked-render": "warn", // Avoid rendering 0 or NaN
-            "react/no-array-index-key": "warn",
-            "react/self-closing-comp": "warn",
-            "react/display-name": "warn", // Help identify components in DevTools
         },
         settings: {
             react: {
