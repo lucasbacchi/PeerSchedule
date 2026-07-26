@@ -153,8 +153,14 @@ service cloud.firestore {
             .affectedKeys().hasOnly([currentUserId()])
           && request.resource.data.participantIds.toSet()
             == request.resource.data.participants.keys().toSet()
-          && request.resource.data.participants[currentUserId()]
-            in ["accepted", "pending", "declined"];
+          && (
+            request.resource.data.participants[currentUserId()]
+              in ["accepted", "pending", "declined"]
+            || (
+              currentUserId() in resource.data.participantIds
+              && !(currentUserId() in request.resource.data.participantIds)
+            )
+          );
       }
 
       function validRequestedEvent() {
@@ -249,17 +255,26 @@ service cloud.firestore {
 
       allow update: if signedIn()
         && exists(/databases/$(database)/documents/events/$(eventId))
-        && canManageLinkedEvent()
-        && request.resource.data.creatorId == resource.data.creatorId
-        && request.resource.data.calendarId == resource.data.calendarId
-        && request.resource.data.title is string
-        && request.resource.data.title.size() >= 2
-        && request.resource.data.title.size() <= 120
-        && request.resource.data.description is string
-        && request.resource.data.description.size() <= 1000
-        && request.resource.data.location is string
-        && request.resource.data.location.size() <= 160
-        && request.resource.data.viewerIds is list;
+        && (
+          (canManageLinkedEvent()
+            && request.resource.data.creatorId == resource.data.creatorId
+            && request.resource.data.calendarId == resource.data.calendarId
+            && request.resource.data.title is string
+            && request.resource.data.title.size() >= 2
+            && request.resource.data.title.size() <= 120
+            && request.resource.data.description is string
+            && request.resource.data.description.size() <= 1000
+            && request.resource.data.location is string
+            && request.resource.data.location.size() <= 160
+            && request.resource.data.viewerIds is list)
+          || (
+            currentUserId() in resource.data.viewerIds
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["viewerIds", "updatedAt"])
+            && request.resource.data.viewerIds.toSet()
+              == resource.data.viewerIds.toSet().difference([currentUserId()].toSet())
+          )
+        );
 
       allow delete: if signedIn()
         && exists(/databases/$(database)/documents/events/$(eventId))

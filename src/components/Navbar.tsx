@@ -66,11 +66,7 @@ export default function Navbar() {
                     className="flex min-w-0 items-center"
                     aria-label="PeerSchedule home"
                 >
-                    <img
-                        src={logo}
-                        alt=""
-                        className="h-11 w-auto max-w-[12rem] object-contain sm:h-12"
-                    />
+                    <img src={logo} alt="" className="h-11 w-auto max-w-[12rem] object-contain sm:h-12" />
                 </NavLink>
 
                 {!isLoading && user ? (

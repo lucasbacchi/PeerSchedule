@@ -5,6 +5,8 @@ import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebas
 import {
     Timestamp,
     collection,
+    arrayRemove,
+    deleteField,
     doc,
     getDoc,
     getDocs,
@@ -13,6 +15,7 @@ import {
     setDoc,
     updateDoc,
     where,
+    writeBatch,
 } from "firebase/firestore";
 
 const projectId = "peerschedule-rules-test";
@@ -79,6 +82,16 @@ beforeEach(async () => {
             setDoc(doc(database, "users", "admin"), user("Admin", "admin")),
             setDoc(doc(database, "groups", "calendar"), calendar),
             setDoc(doc(database, "events", "event"), event),
+            setDoc(doc(database, "eventDetails", "event"), {
+                title: event.title,
+                description: "",
+                location: "",
+                creatorId: "owner",
+                calendarId: "calendar",
+                visibility: "full_details",
+                viewerIds: ["owner", "member"],
+                updatedAt: Timestamp.now(),
+            }),
         ]);
     });
 });
@@ -143,6 +156,25 @@ test("participants can update only their own RSVP", async () => {
             updatedAt: Timestamp.now(),
         })
     );
+});
+
+test("participants can remove themselves from an event and its private details", async () => {
+    const database = testEnvironment.authenticatedContext("member").firestore();
+    const batch = writeBatch(database);
+    batch.update(doc(database, "events", "event"), {
+        "participants.member": deleteField(),
+        participantIds: arrayRemove("member"),
+        updatedAt: Timestamp.now(),
+    });
+    batch.update(doc(database, "eventDetails", "event"), {
+        viewerIds: arrayRemove("member"),
+        updatedAt: Timestamp.now(),
+    });
+    batch.update(doc(database, "groups", "calendar"), {
+        memberIds: arrayRemove("member"),
+        updatedAt: Timestamp.now(),
+    });
+    await assertSucceeds(batch.commit());
 });
 
 test("normal users cannot perform admin reads", async () => {
