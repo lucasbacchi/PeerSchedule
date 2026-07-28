@@ -1,14 +1,23 @@
-import { type SubmitEventHandler, useCallback, useEffect, useMemo, useState } from "react";
+import { type MouseEvent, type SubmitEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Timestamp } from "firebase/firestore";
 
 import Modal from "@/components/common/Modal";
 import PageState from "@/components/common/PageState";
+import CalendarColorPicker from "@/components/common/CalendarColorPicker";
 import { useRequireAuth } from "@/hooks/useAuth";
+import {
+    type AvailabilityStatus,
+    type DailyAvailability,
+    setAvailabilitySlot,
+    setUnavailableSlots,
+    watchDailyAvailability,
+} from "@/services/availabilityService";
 import {
     addCalendarMember,
     deleteCalendar,
     getCalendarById,
+    getUserCalendars,
     removeCalendarMember,
     updateCalendar,
 } from "@/services/calendarService";
@@ -19,6 +28,7 @@ import {
     removeParticipant,
     updateEvent,
     updateParticipantStatus,
+    watchEventsByCalendarId,
 } from "@/services/calendarEventService";
 import type { DeleteEventScope } from "@/services/calendarEventService";
 import { getFriends } from "@/services/friendService";
@@ -43,6 +53,7 @@ interface CalendarSettingsState {
     name: string;
     description: string;
     color: string;
+    allowMembersToEditEvents: boolean;
 }
 
 type CalendarView = "day" | "week" | "month";
@@ -52,6 +63,14 @@ const eventTypeLabels: Record<EventType, string> = {
     open_event: "Open event",
     blocked_time: "Blocked time",
 };
+
+const eventTypeDescriptions: Record<EventType, string> = {
+    meeting: "A scheduled event involving specific participants, such as a study session or group meeting.",
+    open_event: "An optional event that calendar members can join or leave themselves.",
+    blocked_time: "Legacy blocked time.",
+};
+
+const selectableEventTypes: EventType[] = ["meeting", "open_event"];
 
 const visibilityLabels: Record<Visibility, string> = {
     full_details: "Full details",
@@ -72,6 +91,17 @@ const hourLabels = Array.from({ length: 24 }, (_, hour) => {
     const date = new Date(2000, 0, 1, hour);
     return date.toLocaleTimeString([], { hour: "numeric" });
 });
+const availabilitySlots = Array.from({ length: 48 }, (_, index) => {
+    const hour = Math.floor(index / 2);
+    const minute = index % 2 === 0 ? 0 : 30;
+    return {
+        key: `${pad(hour)}${pad(minute)}`,
+        label: new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+        }),
+    };
+});
 
 const toDateKey = (date: Date): string => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 
@@ -90,9 +120,71 @@ const eventGridPosition = (event: CalendarEvent): { top: number; height: number 
     };
 };
 
-const createDefaultEventForm = (date = new Date()): EventFormState => {
+interface EventGridLayout {
+    top: number;
+    height: number;
+    left: string;
+    width: string;
+}
+
+const buildOverlappingEventLayouts = (events: CalendarEvent[]): Map<string, EventGridLayout> => {
+    const layouts = new Map<string, EventGridLayout>();
+    const sortedEvents = [...events].sort(
+        (first, second) =>
+            first.startTime.toMillis() - second.startTime.toMillis() ||
+            first.endTime.toMillis() - second.endTime.toMillis()
+    );
+    const clusters: CalendarEvent[][] = [];
+    let currentCluster: CalendarEvent[] = [];
+    let clusterEnd = 0;
+
+    for (const event of sortedEvents) {
+        const start = event.startTime.toMillis();
+        if (currentCluster.length > 0 && start >= clusterEnd) {
+            clusters.push(currentCluster);
+            currentCluster = [];
+        }
+        currentCluster.push(event);
+        clusterEnd = Math.max(clusterEnd, event.endTime.toMillis());
+    }
+    if (currentCluster.length > 0) clusters.push(currentCluster);
+
+    for (const cluster of clusters) {
+        const columnEndTimes: number[] = [];
+        const eventColumns = new Map<string, number>();
+        for (const event of cluster) {
+            const start = event.startTime.toMillis();
+            let column = columnEndTimes.findIndex((endTime) => endTime <= start);
+            if (column === -1) {
+                column = columnEndTimes.length;
+                columnEndTimes.push(event.endTime.toMillis());
+            } else {
+                columnEndTimes[column] = event.endTime.toMillis();
+            }
+            eventColumns.set(event.id, column);
+        }
+
+        const columnCount = Math.max(1, columnEndTimes.length);
+        for (const event of cluster) {
+            const column = eventColumns.get(event.id) ?? 0;
+            layouts.set(event.id, {
+                ...eventGridPosition(event),
+                left: `calc(${(column / columnCount) * 100}% + 4px)`,
+                width: `calc(${100 / columnCount}% - 8px)`,
+            });
+        }
+    }
+
+    return layouts;
+};
+
+const createDefaultEventForm = (date = new Date(), preserveTime = false): EventFormState => {
     const start = new Date(date);
-    start.setHours(9, 0, 0, 0);
+    if (preserveTime) {
+        start.setMinutes(0, 0, 0);
+    } else {
+        start.setHours(9, 0, 0, 0);
+    }
     const end = new Date(start);
     end.setHours(start.getHours() + 1);
     const recurrenceUntil = new Date(start);
@@ -119,7 +211,7 @@ const eventToForm = (event: CalendarEvent): EventFormState => ({
     location: event.location ?? "",
     startTime: toDateTimeLocal(event.startTime.toDate()),
     endTime: toDateTimeLocal(event.endTime.toDate()),
-    type: event.type,
+    type: event.type === "blocked_time" ? "meeting" : event.type,
     visibility: event.visibility,
     participantIds: event.participantIds.filter((participantId) => participantId !== event.creatorId),
     isRecurring: event.isRecurring,
@@ -167,15 +259,28 @@ export default function CalendarPage() {
         return new Date(now.getFullYear(), now.getMonth(), 1);
     });
     const [calendarView, setCalendarView] = useState<CalendarView>("month");
+    const [dayDisplayMode, setDayDisplayMode] = useState<"events" | "availability">("events");
+    const [availabilityPaint, setAvailabilityPaint] = useState<AvailabilityStatus | null>("available");
+    const [dailyAvailability, setDailyAvailability] = useState<DailyAvailability[]>([]);
+    const [hoveredAvailabilitySlot, setHoveredAvailabilitySlot] = useState<string | null>(null);
+    const [availabilityComparisonUserId, setAvailabilityComparisonUserId] = useState("everyone");
+    const isPaintingAvailability = useRef(false);
     const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
     const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
     const [isEventFormOpen, setIsEventFormOpen] = useState(false);
     const [eventForm, setEventForm] = useState<EventFormState>(() => createDefaultEventForm());
     const [eventToDelete, setEventToDelete] = useState<CalendarEvent | null>(null);
+    const [deleteEventError, setDeleteEventError] = useState<string | null>(null);
+    const [deletingScope, setDeletingScope] = useState<DeleteEventScope | null>(null);
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isCalendarDeleteConfirmOpen, setIsCalendarDeleteConfirmOpen] = useState(false);
-    const [settings, setSettings] = useState<CalendarSettingsState>({ name: "", description: "", color: "#2563eb" });
+    const [settings, setSettings] = useState<CalendarSettingsState>({
+        name: "",
+        description: "",
+        color: "#2563eb",
+        allowMembersToEditEvents: false,
+    });
     const [memberSearchText, setMemberSearchText] = useState("");
     const [memberSearchResults, setMemberSearchResults] = useState<User[]>([]);
     const [isSearchingMembers, setIsSearchingMembers] = useState(false);
@@ -211,6 +316,7 @@ export default function CalendarPage() {
                 name: nextCalendar.name,
                 description: nextCalendar.description ?? "",
                 color: nextCalendar.color ?? "#2563eb",
+                allowMembersToEditEvents: nextCalendar.allowMembersToEditEvents,
             });
         } catch (error: unknown) {
             console.error("Unable to load calendar:", error);
@@ -223,6 +329,27 @@ export default function CalendarPage() {
     useEffect(() => {
         void loadCalendar();
     }, [loadCalendar]);
+
+    useEffect(() => {
+        if (!user || !calendarId) return;
+
+        return watchEventsByCalendarId(calendarId, setEvents, (error) => setErrorMessage(error.message));
+    }, [calendarId, user]);
+
+    useEffect(() => {
+        if (!calendarId || !user) return;
+        return watchDailyAvailability(calendarId, toDateKey(displayMonth), setDailyAvailability, (error) =>
+            setErrorMessage(error.message)
+        );
+    }, [calendarId, displayMonth, user]);
+
+    useEffect(() => {
+        const stopPainting = (): void => {
+            isPaintingAvailability.current = false;
+        };
+        window.addEventListener("pointerup", stopPainting);
+        return () => window.removeEventListener("pointerup", stopPainting);
+    }, []);
 
     useEffect(() => {
         const intervalId = window.setInterval(() => {
@@ -242,6 +369,85 @@ export default function CalendarPage() {
         }
         return grouped;
     }, [events]);
+    const dayEvents = useMemo(() => eventsByDate.get(toDateKey(displayMonth)) ?? [], [displayMonth, eventsByDate]);
+    const dayEventLayouts = useMemo(() => buildOverlappingEventLayouts(dayEvents), [dayEvents]);
+    const availabilityByUser = useMemo(
+        () => new Map(dailyAvailability.map((record) => [record.userId, record.slots])),
+        [dailyAvailability]
+    );
+    const hoveredAvailability = useMemo(() => {
+        if (!hoveredAvailabilitySlot) return null;
+        const available: string[] = [];
+        const unavailable: string[] = [];
+        const unanswered: string[] = [];
+        for (const member of members) {
+            const status = availabilityByUser.get(member.uid)?.[hoveredAvailabilitySlot];
+            if (status === "available") available.push(member.displayName);
+            else if (status === "unavailable") unavailable.push(member.displayName);
+            else unanswered.push(member.displayName);
+        }
+        return { available, unavailable, unanswered };
+    }, [availabilityByUser, hoveredAvailabilitySlot, members]);
+
+    const paintAvailabilitySlot = (slot: string, status: AvailabilityStatus | null = availabilityPaint): void => {
+        if (!user || !calendarId) return;
+        const date = toDateKey(displayMonth);
+        setDailyAvailability((current) => {
+            const existing = current.find((record) => record.userId === user.uid);
+            const slots = { ...(existing?.slots ?? {}) };
+            if (status) slots[slot] = status;
+            else delete slots[slot];
+            const nextRecord: DailyAvailability = {
+                id: `${calendarId}_${user.uid}_${date}`,
+                calendarId,
+                userId: user.uid,
+                date,
+                slots,
+            };
+            return [...current.filter((record) => record.userId !== user.uid), nextRecord];
+        });
+        void setAvailabilitySlot(calendarId, user.uid, date, slot, status).catch((error: unknown) =>
+            setErrorMessage(error instanceof Error ? error.message : "Unable to update availability.")
+        );
+    };
+
+    const blockFromPersonalCalendar = (): void => {
+        if (!user || !calendarId || calendar?.isPersonal) return;
+        void (async () => {
+            try {
+                setIsSaving(true);
+                setErrorMessage(null);
+                const personalCalendar = (await getUserCalendars(user.uid)).find((item) => item.isPersonal);
+                if (!personalCalendar) throw new Error("Your personal calendar is not ready yet.");
+                const personalEvents = await getEventsByCalendarId(personalCalendar.id);
+                const date = toDateKey(displayMonth);
+                const blockedSlots = availabilitySlots
+                    .filter((slot) => {
+                        const hour = Number(slot.key.slice(0, 2));
+                        const minute = Number(slot.key.slice(2, 4));
+                        const slotStart = new Date(displayMonth);
+                        slotStart.setHours(hour, minute, 0, 0);
+                        const slotEnd = new Date(slotStart.getTime() + 30 * 60_000);
+                        return personalEvents.some(
+                            (event) =>
+                                event.startTime.toMillis() < slotEnd.getTime() &&
+                                event.endTime.toMillis() > slotStart.getTime()
+                        );
+                    })
+                    .map((slot) => slot.key);
+                await setUnavailableSlots(calendarId, user.uid, date, blockedSlots);
+                setSuccessMessage(
+                    blockedSlots.length
+                        ? `Blocked ${blockedSlots.length} time slots from your personal calendar.`
+                        : "No personal calendar events overlap this day."
+                );
+            } catch (error: unknown) {
+                setErrorMessage(error instanceof Error ? error.message : "Unable to import personal busy times.");
+            } finally {
+                setIsSaving(false);
+            }
+        })();
+    };
 
     const monthDates = useMemo(() => buildMonthDates(displayMonth), [displayMonth]);
     const weekDates = useMemo(() => {
@@ -254,18 +460,23 @@ export default function CalendarPage() {
         });
     }, [displayMonth]);
     const isOwner = calendar?.ownerId === user?.uid;
+    const canEditEvent = useCallback(
+        (event: CalendarEvent): boolean =>
+            Boolean(user && (isOwner || event.creatorId === user.uid || calendar?.allowMembersToEditEvents)),
+        [calendar, isOwner, user]
+    );
     const memberMap = useMemo(() => new Map(members.map((member) => [member.uid, member])), [members]);
 
     const canSeeDetails = useCallback(
         (event: CalendarEvent): boolean => {
             if (!user || !calendar) return false;
-            if (isOwner || event.creatorId === user.uid || event.participantIds.includes(user.uid)) return true;
+            if (canEditEvent(event) || event.participantIds.includes(user.uid)) return true;
             if (event.visibility === "full_details") return true;
             if (event.detailsAvailable !== undefined) return event.detailsAvailable;
             if (event.visibility === "friends_only") return friendIds.has(event.creatorId);
             return false;
         },
-        [calendar, friendIds, isOwner, user]
+        [calendar, canEditEvent, friendIds, user]
     );
 
     const visibleTitle = (event: CalendarEvent): string => (canSeeDetails(event) ? event.title : "Busy");
@@ -299,14 +510,24 @@ export default function CalendarPage() {
                 })}`
               : displayMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
-    const openNewEvent = (date = new Date()): void => {
+    const openNewEvent = (date = new Date(), preserveTime = false): void => {
         if (!user) return;
-        const nextForm = createDefaultEventForm(date);
+        const nextForm = createDefaultEventForm(date, preserveTime);
         nextForm.participantIds = [];
         setEditingEvent(null);
         setEventForm(nextForm);
         setErrorMessage(null);
         setIsEventFormOpen(true);
+    };
+
+    const openNewEventFromGrid = (date: Date, clickEvent: MouseEvent<HTMLDivElement>): void => {
+        if (clickEvent.target instanceof Element && clickEvent.target.closest("button")) return;
+        const gridBounds = clickEvent.currentTarget.getBoundingClientRect();
+        const clickedOffset = Math.max(0, Math.min(clickEvent.clientY - gridBounds.top, DAY_GRID_HEIGHT - 1));
+        const clickedHour = Math.floor(clickedOffset / HOUR_HEIGHT);
+        const eventStart = new Date(date);
+        eventStart.setHours(clickedHour, 0, 0, 0);
+        openNewEvent(eventStart, true);
     };
 
     const openEditEvent = (event: CalendarEvent): void => {
@@ -410,18 +631,24 @@ export default function CalendarPage() {
 
     const handleDeleteEvent = (scope: DeleteEventScope = "single"): void => {
         if (!eventToDelete) return;
+        const targetEvent = eventToDelete;
         void (async () => {
             try {
                 setIsSaving(true);
-                await deleteEvent(eventToDelete.id, scope);
+                setDeletingScope(scope);
+                setDeleteEventError(null);
+                await deleteEvent(targetEvent.id, scope);
                 setEventToDelete(null);
                 setSelectedEvent(null);
                 setSuccessMessage(scope === "single" ? "Event deleted." : "Recurring events deleted.");
                 await loadCalendar();
             } catch (error: unknown) {
-                setErrorMessage(error instanceof Error ? error.message : "Unable to delete the event.");
+                const message = error instanceof Error ? error.message : "Unable to delete the event.";
+                setDeleteEventError(message);
+                setErrorMessage(message);
             } finally {
                 setIsSaving(false);
+                setDeletingScope(null);
             }
         })();
     };
@@ -690,6 +917,24 @@ export default function CalendarPage() {
                                         </button>
                                     ))}
                                 </div>
+                                {calendarView === "day" ? (
+                                    <div className="flex rounded-lg border border-slate-300 bg-slate-50 p-1">
+                                        {(["events", "availability"] as const).map((mode) => (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                onClick={() => setDayDisplayMode(mode)}
+                                                className={`rounded-md px-3 py-1.5 text-sm font-bold capitalize ${
+                                                    dayDisplayMode === mode
+                                                        ? "bg-white text-blue-700 shadow-sm"
+                                                        : "text-slate-600"
+                                                }`}
+                                            >
+                                                {mode}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null}
                             </div>
                         </header>
 
@@ -801,7 +1046,7 @@ export default function CalendarPage() {
                                                     key={toDateKey(date)}
                                                     className="relative border-l border-slate-200"
                                                     style={{ height: DAY_GRID_HEIGHT }}
-                                                    onDoubleClick={() => openNewEvent(date)}
+                                                    onDoubleClick={(event) => openNewEventFromGrid(date, event)}
                                                 >
                                                     {hourLabels.map((_, hour) => (
                                                         <div
@@ -845,6 +1090,201 @@ export default function CalendarPage() {
                                     </div>
                                 </div>
                             </div>
+                        ) : dayDisplayMode === "availability" ? (
+                            <div className="p-4">
+                                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <h3 className="font-black text-slate-900">Daily availability</h3>
+                                        <p className="text-sm text-slate-500">
+                                            Paint your availability, then compare with the group or one person.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {!calendar.isPersonal ? (
+                                            <button
+                                                type="button"
+                                                onClick={blockFromPersonalCalendar}
+                                                disabled={isSaving}
+                                                className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                                            >
+                                                {isSaving ? "Blocking..." : "Block from personal calendar"}
+                                            </button>
+                                        ) : null}
+                                        {(
+                                            [
+                                                ["available", "Available", "bg-emerald-600 text-white"],
+                                                ["unavailable", "Unavailable", "bg-red-600 text-white"],
+                                                [null, "Clear", "bg-slate-600 text-white"],
+                                            ] as const
+                                        ).map(([status, label, activeClass]) => (
+                                            <button
+                                                key={label}
+                                                type="button"
+                                                onClick={() => setAvailabilityPaint(status)}
+                                                className={`rounded-lg px-3 py-2 text-sm font-bold ${
+                                                    availabilityPaint === status
+                                                        ? activeClass
+                                                        : "border border-slate-300 bg-white text-slate-700"
+                                                }`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {hoveredAvailability ? (
+                                    <div className="mb-4 grid gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm sm:grid-cols-3">
+                                        <p>
+                                            <strong className="text-emerald-700">Available:</strong>{" "}
+                                            {hoveredAvailability.available.join(", ") || "Nobody"}
+                                        </p>
+                                        <p>
+                                            <strong className="text-red-700">Unavailable:</strong>{" "}
+                                            {hoveredAvailability.unavailable.join(", ") || "Nobody"}
+                                        </p>
+                                        <p>
+                                            <strong className="text-slate-600">No response:</strong>{" "}
+                                            {hoveredAvailability.unanswered.join(", ") || "Nobody"}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="mb-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
+                                        Hover over a time to see everyone’s overlap.
+                                    </p>
+                                )}
+
+                                <div className="rounded-xl border border-slate-200">
+                                    <div>
+                                        <div className="sticky top-16 z-20 grid grid-cols-[5rem_minmax(8rem,1fr)_minmax(10rem,1fr)] bg-slate-100 shadow-sm">
+                                            <div className="border-r border-slate-200 p-2 text-xs font-bold text-slate-500">
+                                                Time
+                                            </div>
+                                            <div className="border-r border-slate-200 p-2 text-center text-sm font-bold text-slate-800">
+                                                Your availability
+                                            </div>
+                                            <div className="p-2">
+                                                <label className="sr-only" htmlFor="availability-comparison">
+                                                    Compare availability
+                                                </label>
+                                                <select
+                                                    id="availability-comparison"
+                                                    value={availabilityComparisonUserId}
+                                                    onChange={(event) =>
+                                                        setAvailabilityComparisonUserId(event.target.value)
+                                                    }
+                                                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-bold text-slate-800"
+                                                >
+                                                    <option value="everyone">Everyone — availability overlap</option>
+                                                    {members
+                                                        .filter((member) => member.uid !== user.uid)
+                                                        .map((member) => (
+                                                            <option key={member.uid} value={member.uid}>
+                                                                {member.displayName}
+                                                            </option>
+                                                        ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        {availabilitySlots.map((slot) => {
+                                            const availableCount = members.filter(
+                                                (member) =>
+                                                    availabilityByUser.get(member.uid)?.[slot.key] === "available"
+                                            ).length;
+                                            const availableRatio =
+                                                members.length === 0 ? 0 : availableCount / members.length;
+                                            const ownStatus = availabilityByUser.get(user.uid)?.[slot.key];
+                                            const selectedMember = members.find(
+                                                (member) => member.uid === availabilityComparisonUserId
+                                            );
+                                            const selectedStatus = selectedMember
+                                                ? availabilityByUser.get(selectedMember.uid)?.[slot.key]
+                                                : undefined;
+                                            return (
+                                                <div
+                                                    key={slot.key}
+                                                    className="grid grid-cols-[5rem_minmax(8rem,1fr)_minmax(10rem,1fr)]"
+                                                    onMouseEnter={() => setHoveredAvailabilitySlot(slot.key)}
+                                                    onMouseLeave={() => setHoveredAvailabilitySlot(null)}
+                                                >
+                                                    <div className="border-r border-t border-slate-200 px-2 py-2 text-xs font-semibold text-slate-500">
+                                                        {slot.label}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onPointerDown={(event) => {
+                                                            event.preventDefault();
+                                                            isPaintingAvailability.current = true;
+                                                            paintAvailabilitySlot(slot.key);
+                                                        }}
+                                                        onPointerEnter={() => {
+                                                            if (isPaintingAvailability.current) {
+                                                                paintAvailabilitySlot(slot.key);
+                                                            }
+                                                        }}
+                                                        onContextMenu={(event) => {
+                                                            event.preventDefault();
+                                                            paintAvailabilitySlot(slot.key, null);
+                                                        }}
+                                                        className={`min-h-9 border-r border-t border-slate-200 ${
+                                                            ownStatus === "available"
+                                                                ? "bg-emerald-500/75"
+                                                                : ownStatus === "unavailable"
+                                                                  ? "bg-red-500/70"
+                                                                  : "bg-white hover:bg-blue-100"
+                                                        }`}
+                                                        title={`You: ${ownStatus ?? "No response"}. Right-click to clear.`}
+                                                        aria-label={`${slot.label}, your availability: ${ownStatus ?? "No response"}`}
+                                                    />
+                                                    <div
+                                                        className={`min-h-9 border-t border-slate-200 ${
+                                                            availabilityComparisonUserId === "everyone"
+                                                                ? ""
+                                                                : selectedStatus === "available"
+                                                                  ? "bg-emerald-500/75"
+                                                                  : selectedStatus === "unavailable"
+                                                                    ? "bg-red-500/70"
+                                                                    : "bg-white"
+                                                        }`}
+                                                        style={
+                                                            availabilityComparisonUserId === "everyone"
+                                                                ? {
+                                                                      backgroundColor:
+                                                                          availableCount === 0
+                                                                              ? "rgb(248 250 252)"
+                                                                              : `rgb(5 150 105 / ${Math.round(18 + availableRatio * 82)}%)`,
+                                                                  }
+                                                                : undefined
+                                                        }
+                                                        title={
+                                                            availabilityComparisonUserId === "everyone"
+                                                                ? `${availableCount} of ${members.length} people available`
+                                                                : `${selectedMember?.displayName ?? "Selected member"}: ${selectedStatus ?? "No response"}`
+                                                        }
+                                                        aria-label={
+                                                            availabilityComparisonUserId === "everyone"
+                                                                ? `${slot.label}, ${availableCount} of ${members.length} people available`
+                                                                : `${slot.label}, ${selectedMember?.displayName ?? "Selected member"}: ${selectedStatus ?? "No response"}`
+                                                        }
+                                                    >
+                                                        {availabilityComparisonUserId === "everyone" ? (
+                                                            <span
+                                                                className={`flex h-full min-h-9 items-center justify-center text-xs font-bold ${
+                                                                    availableRatio >= 0.6
+                                                                        ? "text-white"
+                                                                        : "text-slate-700"
+                                                                }`}
+                                                            >
+                                                                {availableCount}/{members.length} available
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
                         ) : (
                             <div className="grid grid-cols-[4rem_minmax(0,1fr)]">
                                 <div className="relative" style={{ height: DAY_GRID_HEIGHT }}>
@@ -861,8 +1301,31 @@ export default function CalendarPage() {
                                 <div
                                     className="relative border-l border-slate-200"
                                     style={{ height: DAY_GRID_HEIGHT }}
-                                    onDoubleClick={() => openNewEvent(displayMonth)}
+                                    onDoubleClick={(event) => openNewEventFromGrid(displayMonth, event)}
                                 >
+                                    {availabilitySlots.map((slot, index) => {
+                                        const availableCount = members.filter(
+                                            (member) => availabilityByUser.get(member.uid)?.[slot.key] === "available"
+                                        ).length;
+                                        const availableRatio =
+                                            members.length === 0 ? 0 : availableCount / members.length;
+                                        return (
+                                            <div
+                                                key={`availability-${slot.key}`}
+                                                className="pointer-events-none absolute left-0 right-0"
+                                                style={{
+                                                    top: index * (HOUR_HEIGHT / 2),
+                                                    height: HOUR_HEIGHT / 2,
+                                                    backgroundColor:
+                                                        availableCount === 0
+                                                            ? "transparent"
+                                                            : `rgb(5 150 105 / ${Math.round(8 + availableRatio * 38)}%)`,
+                                                }}
+                                                title={`${availableCount} of ${members.length} people available`}
+                                                aria-hidden="true"
+                                            />
+                                        );
+                                    })}
                                     {hourLabels.map((_, hour) => (
                                         <div
                                             key={hour}
@@ -871,13 +1334,13 @@ export default function CalendarPage() {
                                             aria-hidden="true"
                                         />
                                     ))}
-                                    {(eventsByDate.get(toDateKey(displayMonth)) ?? []).map((event) => (
+                                    {dayEvents.map((event) => (
                                         <button
                                             key={event.id}
                                             type="button"
                                             onClick={() => setSelectedEvent(event)}
-                                            className={`absolute left-2 right-2 z-10 overflow-hidden rounded-lg border px-3 py-2 text-left shadow-sm ${eventTypeClasses[event.type]}`}
-                                            style={eventGridPosition(event)}
+                                            className={`absolute z-10 overflow-hidden rounded-lg border px-3 py-2 text-left shadow-sm ${eventTypeClasses[event.type]}`}
+                                            style={dayEventLayouts.get(event.id) ?? eventGridPosition(event)}
                                         >
                                             <span className="font-black">{visibleTitle(event)}</span>
                                             <span className="ml-2 text-xs opacity-75">
@@ -1024,17 +1487,21 @@ export default function CalendarPage() {
                             <select
                                 id="event-type"
                                 value={eventForm.type}
+                                title={eventTypeDescriptions[eventForm.type]}
                                 onChange={(event) =>
                                     setEventForm((current) => ({ ...current, type: event.target.value as EventType }))
                                 }
                                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
                             >
-                                {Object.entries(eventTypeLabels).map(([value, label]) => (
-                                    <option key={value} value={value}>
-                                        {label}
+                                {selectableEventTypes.map((type) => (
+                                    <option key={type} value={type} title={eventTypeDescriptions[type]}>
+                                        {eventTypeLabels[type]}
                                     </option>
                                 ))}
                             </select>
+                            <p className="mt-2 text-sm text-slate-500" aria-live="polite">
+                                {eventTypeDescriptions[eventForm.type]}
+                            </p>
                         </div>
                         <div>
                             <label htmlFor="event-visibility" className="block text-sm font-bold text-slate-700">
@@ -1332,7 +1799,7 @@ export default function CalendarPage() {
                             </button>
                         ) : null}
 
-                        {selectedEvent.creatorId === user.uid || isOwner ? (
+                        {canEditEvent(selectedEvent) ? (
                             <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
                                 <button
                                     type="button"
@@ -1344,6 +1811,7 @@ export default function CalendarPage() {
                                 <button
                                     type="button"
                                     onClick={() => {
+                                        setDeleteEventError(null);
                                         setEventToDelete(selectedEvent);
                                         setSelectedEvent(null);
                                     }}
@@ -1403,20 +1871,35 @@ export default function CalendarPage() {
                                     className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
                                 />
                             </div>
-                            <div className="flex items-center gap-3">
-                                <label htmlFor="settings-color" className="text-sm font-bold text-slate-700">
-                                    Color
-                                </label>
-                                <input
+                            <div>
+                                <p className="text-sm font-bold text-slate-700">Calendar color</p>
+                                <CalendarColorPicker
                                     id="settings-color"
-                                    type="color"
                                     value={settings.color}
-                                    onChange={(event) =>
-                                        setSettings((current) => ({ ...current, color: event.target.value }))
-                                    }
-                                    className="h-10 w-16 rounded border border-slate-300 bg-white p-1"
+                                    onChange={(color) => setSettings((current) => ({ ...current, color }))}
+                                    disabled={isSaving}
                                 />
                             </div>
+                            <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                                <input
+                                    type="checkbox"
+                                    checked={settings.allowMembersToEditEvents}
+                                    onChange={(event) =>
+                                        setSettings((current) => ({
+                                            ...current,
+                                            allowMembersToEditEvents: event.target.checked,
+                                        }))
+                                    }
+                                    className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                                />
+                                <span>
+                                    <span className="block font-bold text-slate-900">Let members edit all events</span>
+                                    <span className="block text-sm text-slate-500">
+                                        When enabled, every calendar member can edit events created by other members.
+                                        Only the owner and event creator can delete them.
+                                    </span>
+                                </span>
+                            </label>
                             <button
                                 type="submit"
                                 disabled={isSaving}
@@ -1429,7 +1912,7 @@ export default function CalendarPage() {
 
                     <section>
                         <h3 className="text-lg font-black text-slate-900">Members</h3>
-                        {isOwner ? (
+                        {isOwner && !calendar.isPersonal ? (
                             <div className="mt-3 space-y-4">
                                 <div className="flex flex-col gap-2 sm:flex-row">
                                     <label htmlFor="member-search" className="sr-only">
@@ -1530,7 +2013,11 @@ export default function CalendarPage() {
                         </p>
                     ) : null}
                     <section className="border-t border-slate-200 pt-5">
-                        {isOwner ? (
+                        {calendar.isPersonal ? (
+                            <p className="text-sm text-slate-500">
+                                Your personal calendar is private and cannot be shared or deleted.
+                            </p>
+                        ) : isOwner ? (
                             <button
                                 type="button"
                                 onClick={() => {
@@ -1590,7 +2077,10 @@ export default function CalendarPage() {
             <Modal
                 title="Delete event?"
                 isOpen={eventToDelete !== null}
-                onClose={() => setEventToDelete(null)}
+                onClose={() => {
+                    setEventToDelete(null);
+                    setDeleteEventError(null);
+                }}
                 size="sm"
                 closeDisabled={isSaving}
             >
@@ -1605,7 +2095,7 @@ export default function CalendarPage() {
                             disabled={isSaving}
                             className="rounded-xl border border-red-200 px-4 py-3 text-left font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
                         >
-                            Only this event
+                            {deletingScope === "single" ? "Deleting..." : "Only this event"}
                         </button>
                         <button
                             type="button"
@@ -1613,22 +2103,34 @@ export default function CalendarPage() {
                             disabled={isSaving}
                             className="rounded-xl border border-red-200 px-4 py-3 text-left font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
                         >
-                            This and following events
+                            {deletingScope === "following" ? "Deleting..." : "This and following events"}
                         </button>
                         <button
                             type="button"
                             onClick={() => handleDeleteEvent("series")}
                             disabled={isSaving}
-                            className="rounded-xl bg-red-600 px-4 py-3 text-left font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                            className="rounded-xl border border-red-200 px-4 py-3 text-left font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
                         >
-                            All events in the series
+                            {deletingScope === "series" ? "Deleting..." : "All events in the series"}
                         </button>
                     </div>
+                ) : null}
+                {deleteEventError ? (
+                    <p
+                        role="alert"
+                        className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                    >
+                        {deleteEventError}
+                    </p>
                 ) : null}
                 <div className="mt-6 flex justify-end gap-3">
                     <button
                         type="button"
-                        onClick={() => setEventToDelete(null)}
+                        onClick={() => {
+                            setEventToDelete(null);
+                            setDeleteEventError(null);
+                        }}
+                        disabled={isSaving}
                         className="rounded-xl border border-slate-300 px-4 py-2.5 font-bold text-slate-700"
                     >
                         Cancel

@@ -24,6 +24,8 @@ export interface Group {
     color?: string;
     ownerId: string;
     memberIds: string[];
+    allowMembersToEditEvents: boolean;
+    isPersonal: boolean;
     createdAt: Timestamp;
     updatedAt?: Timestamp;
 }

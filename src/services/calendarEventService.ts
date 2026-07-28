@@ -1,5 +1,6 @@
 import {
     Timestamp,
+    type Unsubscribe,
     arrayRemove,
     arrayUnion,
     collection,
@@ -7,6 +8,7 @@ import {
     doc,
     getDoc,
     getDocs,
+    onSnapshot,
     query,
     updateDoc,
     where,
@@ -382,6 +384,22 @@ export const getEventsByCalendarId = async (calendarId: string): Promise<Calenda
     return hydrateEvents(events);
 };
 
+export const watchEventsByCalendarId = (
+    calendarId: string,
+    onChange: (events: CalendarEvent[]) => void,
+    onError: (error: Error) => void
+): Unsubscribe =>
+    onSnapshot(
+        query(collection(db, EVENTS_COLLECTION), where("calendarId", "==", calendarId)),
+        (snapshot) => {
+            const events = snapshot.docs
+                .map((eventDocument) => eventFromDocument(eventDocument.id, eventDocument.data()))
+                .sort((first, second) => first.startTime.toMillis() - second.startTime.toMillis());
+            void hydrateEvents(events).then(onChange).catch(onError);
+        },
+        onError
+    );
+
 export const getUserEvents = async (uid: string): Promise<CalendarEvent[]> => {
     const eventsReference = collection(db, EVENTS_COLLECTION);
     const [participantSnapshot, creatorSnapshot] = await Promise.all([
@@ -513,7 +531,7 @@ export const deleteEvent = async (eventId: string, scope: DeleteEventScope = "si
                       query(collection(db, EVENTS_COLLECTION), where("calendarId", "==", selectedEvent.calendarId))
                   );
 
-        eventIds = snapshot.docs
+        const matchingEventIds = snapshot.docs
             .filter((eventDocument) => {
                 const candidate = eventFromDocument(eventDocument.id, eventDocument.data());
                 const belongsToSeries = selectedEvent.recurrenceSeriesId
@@ -529,6 +547,7 @@ export const deleteEvent = async (eventId: string, scope: DeleteEventScope = "si
                 );
             })
             .map((eventDocument) => eventDocument.id);
+        eventIds = [...new Set([eventId, ...matchingEventIds])];
     }
 
     for (let start = 0; start < eventIds.length; start += 225) {

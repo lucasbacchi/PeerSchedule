@@ -37,6 +37,11 @@ service cloud.firestore {
         && calendarData(calendarId).ownerId == currentUserId();
     }
 
+    function canCalendarMembersEditEvents(calendarId) {
+      return isCalendarMember(calendarId)
+        && calendarData(calendarId).get("allowMembersToEditEvents", false) == true;
+    }
+
     match /users/{userId} {
       allow create: if signedIn()
         && userId == currentUserId()
@@ -86,7 +91,14 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 80
         && request.resource.data.description is string
         && request.resource.data.description.size() <= 300
-        && request.resource.data.color is string;
+        && request.resource.data.color is string
+        && (!("isPersonal" in request.resource.data)
+          || request.resource.data.isPersonal is bool)
+        && (request.resource.data.get("isPersonal", false) == false
+          || (groupId == "personal_" + currentUserId()
+            && request.resource.data.memberIds == [currentUserId()]))
+        && (!("allowMembersToEditEvents" in request.resource.data)
+          || request.resource.data.allowMembersToEditEvents is bool);
 
       allow read: if isAdmin()
         || (signedIn() && currentUserId() in resource.data.memberIds);
@@ -103,7 +115,13 @@ service cloud.firestore {
           && request.resource.data.name.size() <= 80
           && request.resource.data.description is string
           && request.resource.data.description.size() <= 300
-          && request.resource.data.color is string)
+          && request.resource.data.color is string
+          && request.resource.data.get("isPersonal", false)
+            == resource.data.get("isPersonal", false)
+          && (resource.data.get("isPersonal", false) == false
+            || request.resource.data.memberIds == [resource.data.ownerId])
+          && (!("allowMembersToEditEvents" in request.resource.data)
+            || request.resource.data.allowMembersToEditEvents is bool))
         || (signedIn()
           && currentUserId() in resource.data.memberIds
           && resource.data.ownerId != currentUserId()
@@ -112,8 +130,9 @@ service cloud.firestore {
           && request.resource.data.memberIds.toSet()
             == resource.data.memberIds.toSet().difference([currentUserId()].toSet()));
 
-      allow delete: if isAdmin()
-        || (signedIn() && resource.data.ownerId == currentUserId());
+      allow delete: if resource.data.get("isPersonal", false) == false
+        && (isAdmin()
+          || (signedIn() && resource.data.ownerId == currentUserId()));
     }
 
     match /events/{eventId} {
@@ -142,6 +161,11 @@ service cloud.firestore {
             && resource.data.creatorId == currentUserId()
             && (eventCalendarId() == null || isCalendarMember(eventCalendarId())))
           || isCalendarOwner(eventCalendarId());
+      }
+
+      function canEditExistingEvent() {
+        return canManageExistingEvent()
+          || canCalendarMembersEditEvents(eventCalendarId());
       }
 
       function isOwnParticipantOnlyUpdate() {
@@ -201,8 +225,10 @@ service cloud.firestore {
         && (requestedCalendarId() == null || isCalendarMember(requestedCalendarId()));
 
       allow read: if canReadExistingEvent();
-      allow update: if (canManageExistingEvent()
-          && request.resource.data.creatorId == resource.data.creatorId
+      allow update: if (canEditExistingEvent()
+          && (request.resource.data.creatorId == resource.data.creatorId
+            || (isCalendarOwner(eventCalendarId())
+              && request.resource.data.creatorId == currentUserId()))
           && request.resource.data.calendarId == resource.data.calendarId
           && validRequestedEvent())
         || isOwnParticipantOnlyUpdate();
@@ -227,10 +253,20 @@ service cloud.firestore {
           || isCalendarOwner(linkedEvent().calendarId);
       }
 
-      allow create: if signedIn()
-        && (isAdmin()
+      function canEditLinkedEvent() {
+        return canManageLinkedEvent()
+          || canCalendarMembersEditEvents(linkedEvent().calendarId);
+      }
+
+      function canEditLinkedEventAfter() {
+        return isAdmin()
           || linkedEventAfter().creatorId == currentUserId()
-          || isCalendarOwner(linkedEventAfter().calendarId))
+          || isCalendarOwner(linkedEventAfter().calendarId)
+          || canCalendarMembersEditEvents(linkedEventAfter().calendarId);
+      }
+
+      allow create: if signedIn()
+        && canEditLinkedEventAfter()
         && request.resource.data.creatorId == linkedEventAfter().creatorId
         && request.resource.data.calendarId == linkedEventAfter().calendarId
         && request.resource.data.title is string
@@ -250,14 +286,17 @@ service cloud.firestore {
             || (linkedEvent().participantIds is list
               && currentUserId() in linkedEvent().participantIds)
             || isCalendarOwner(linkedEvent().calendarId)
+            || canCalendarMembersEditEvents(linkedEvent().calendarId)
             || (resource.data.viewerIds is list
               && currentUserId() in resource.data.viewerIds)));
 
       allow update: if signedIn()
         && exists(/databases/$(database)/documents/events/$(eventId))
         && (
-          (canManageLinkedEvent()
-            && request.resource.data.creatorId == resource.data.creatorId
+          (canEditLinkedEvent()
+            && (request.resource.data.creatorId == resource.data.creatorId
+              || (isCalendarOwner(resource.data.calendarId)
+                && request.resource.data.creatorId == currentUserId()))
             && request.resource.data.calendarId == resource.data.calendarId
             && request.resource.data.title is string
             && request.resource.data.title.size() >= 2
@@ -311,6 +350,25 @@ service cloud.firestore {
         || (signedIn()
           && (resource.data.senderId == currentUserId()
             || resource.data.receiverId == currentUserId()));
+    }
+
+    match /availability/{availabilityId} {
+      allow read: if isAdmin()
+        || (signedIn() && isCalendarMember(resource.data.calendarId));
+      allow create: if signedIn()
+        && request.resource.data.userId == currentUserId()
+        && isCalendarMember(request.resource.data.calendarId)
+        && request.resource.data.date is string
+        && request.resource.data.slots is map;
+      allow update: if signedIn()
+        && resource.data.userId == currentUserId()
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.calendarId == resource.data.calendarId
+        && request.resource.data.date == resource.data.date
+        && isCalendarMember(resource.data.calendarId)
+        && request.resource.data.slots is map;
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.userId == currentUserId());
     }
   }
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router";
 
 import { useAuth } from "@/hooks/useAuth";
+import { watchFriendRequests } from "@/services/friendService";
 import type { User } from "@/types/database";
 import logo from "../public/img/TempLogo.png";
 
@@ -17,6 +18,7 @@ export default function Navbar() {
     const [profile, setProfile] = useState<User | null>(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isSigningOut, setIsSigningOut] = useState(false);
+    const [newRequestCount, setNewRequestCount] = useState(0);
 
     useEffect(() => {
         setIsMenuOpen(false);
@@ -41,6 +43,21 @@ export default function Navbar() {
         return () => {
             isCancelled = true;
         };
+    }, [user]);
+
+    useEffect(() => {
+        if (!user) {
+            setNewRequestCount(0);
+            return;
+        }
+
+        return watchFriendRequests(
+            user.uid,
+            ({ incoming }) => {
+                setNewRequestCount(incoming.filter((request) => request.status === "pending").length);
+            },
+            () => setNewRequestCount(0)
+        );
     }, [user]);
 
     const handleSignOut = (): void => {
@@ -92,8 +109,18 @@ export default function Navbar() {
                             <NavLink to="/calendars" className={linkClasses}>
                                 Calendars
                             </NavLink>
-                            <NavLink to="/friends" className={linkClasses}>
-                                Friends
+                            <NavLink to="/friends" className={(state) => `${linkClasses(state)} relative`}>
+                                <span>Friends</span>
+                                {newRequestCount > 0 ? (
+                                    <span
+                                        className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-black leading-none text-white"
+                                        aria-label={`${newRequestCount} new friend ${
+                                            newRequestCount === 1 ? "request" : "requests"
+                                        }`}
+                                    >
+                                        {newRequestCount > 99 ? "99+" : newRequestCount}
+                                    </span>
+                                ) : null}
                             </NavLink>
                             <NavLink to="/account" className={linkClasses}>
                                 Account

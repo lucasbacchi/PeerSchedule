@@ -9,6 +9,7 @@ import {
     removeFriend,
     respondToFriendRequest,
     sendFriendRequest,
+    watchFriendRequests,
 } from "@/services/friendService";
 import { getUsersByIds, searchUsers } from "@/services/userService";
 import type { FriendRequest, User } from "@/types/database";
@@ -52,8 +53,39 @@ export default function FriendsPage() {
     }, [user]);
 
     useEffect(() => {
-        void loadFriends();
-    }, [loadFriends]);
+        if (!user) return;
+
+        return watchFriendRequests(
+            user.uid,
+            (requests) => {
+                void (async () => {
+                    try {
+                        const nextFriends = await getFriends(user.uid);
+                        const relatedIds = [
+                            ...nextFriends.map((friend) => friend.uid),
+                            ...requests.incoming.map((request) => request.senderId),
+                            ...requests.outgoing.map((request) => request.receiverId),
+                        ];
+                        const relatedUsers = await getUsersByIds(relatedIds);
+                        setFriends(nextFriends);
+                        setIncoming(requests.incoming);
+                        setOutgoing(requests.outgoing);
+                        setUserMap(new Map(relatedUsers.map((relatedUser) => [relatedUser.uid, relatedUser])));
+                        setIsLoading(false);
+                    } catch (error: unknown) {
+                        setErrorMessage(
+                            error instanceof Error ? error.message : "Unable to update friend information."
+                        );
+                        setIsLoading(false);
+                    }
+                })();
+            },
+            (error) => {
+                setErrorMessage(error.message);
+                setIsLoading(false);
+            }
+        );
+    }, [user]);
 
     const friendIdSet = useMemo(() => new Set(friends.map((friend) => friend.uid)), [friends]);
     const pendingUserIds = useMemo(() => {
@@ -62,6 +94,13 @@ export default function FriendsPage() {
         for (const request of outgoing.filter((request) => request.status === "pending")) ids.add(request.receiverId);
         return ids;
     }, [incoming, outgoing]);
+    const incomingRequestBySenderId = useMemo(
+        () =>
+            new Map(
+                incoming.filter((request) => request.status === "pending").map((request) => [request.senderId, request])
+            ),
+        [incoming]
+    );
 
     const handleSearch: SubmitEventHandler<HTMLFormElement> = (event) => {
         event.preventDefault();
@@ -174,6 +213,7 @@ export default function FriendsPage() {
                             {searchResults.map((result) => {
                                 const alreadyFriends = friendIdSet.has(result.uid);
                                 const isPending = pendingUserIds.has(result.uid);
+                                const incomingRequest = incomingRequestBySenderId.get(result.uid);
                                 return (
                                     <article
                                         key={result.uid}
@@ -200,16 +240,35 @@ export default function FriendsPage() {
                                         </div>
                                         <button
                                             type="button"
-                                            disabled={isWorking || alreadyFriends || isPending}
+                                            disabled={isWorking || alreadyFriends || (isPending && !incomingRequest)}
                                             onClick={() =>
-                                                runAction(
-                                                    () => sendFriendRequest(user.uid, result.uid).then(() => undefined),
-                                                    `Friend request sent to ${result.displayName}.`
-                                                )
+                                                incomingRequest
+                                                    ? runAction(
+                                                          () =>
+                                                              respondToFriendRequest(
+                                                                  incomingRequest.id,
+                                                                  user.uid,
+                                                                  "accepted"
+                                                              ),
+                                                          `${result.displayName} is now your friend.`
+                                                      )
+                                                    : runAction(
+                                                          () =>
+                                                              sendFriendRequest(user.uid, result.uid).then(
+                                                                  () => undefined
+                                                              ),
+                                                          `Friend request sent to ${result.displayName}.`
+                                                      )
                                             }
                                             className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-500"
                                         >
-                                            {alreadyFriends ? "Friends" : isPending ? "Pending" : "Add friend"}
+                                            {alreadyFriends
+                                                ? "Friends"
+                                                : incomingRequest
+                                                  ? "Accept"
+                                                  : isPending
+                                                    ? "Pending"
+                                                    : "Add friend"}
                                         </button>
                                     </article>
                                 );

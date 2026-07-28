@@ -4,6 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router";
 
 import { auth } from "@/lib/firebase";
+import { ensurePersonalCalendar } from "@/services/calendarService";
 
 interface AuthState {
     user: FirebaseUser | null;
@@ -18,6 +19,7 @@ export function useAuth(): AuthState {
         return onAuthStateChanged(auth, (nextUser) => {
             setUser(nextUser);
             setIsLoading(false);
+            if (nextUser) void ensurePersonalCalendar(nextUser.uid, nextUser.displayName);
         });
     }, []);
 

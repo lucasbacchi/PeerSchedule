@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import Modal from "@/components/common/Modal";
 import PageState from "@/components/common/PageState";
+import CalendarColorPicker from "@/components/common/CalendarColorPicker";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { createCalendar, deleteCalendar, getUserCalendars, updateCalendar } from "@/services/calendarService";
 import type { Group } from "@/types/database";
@@ -207,14 +208,17 @@ export default function ChooseCalendarPage() {
                                             <span
                                                 className={`rounded-full px-3 py-1 text-xs font-bold ${isOwner ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"}`}
                                             >
-                                                {isOwner ? "Owner" : "Member"}
+                                                {calendar.isPersonal ? "Personal" : isOwner ? "Owner" : "Member"}
                                             </span>
                                         </div>
 
                                         <div className="mt-6 flex flex-1 items-end justify-between text-sm text-slate-500">
                                             <span>
-                                                {calendar.memberIds.length}{" "}
-                                                {calendar.memberIds.length === 1 ? "member" : "members"}
+                                                {calendar.isPersonal
+                                                    ? "Private"
+                                                    : `${calendar.memberIds.length} ${
+                                                          calendar.memberIds.length === 1 ? "member" : "members"
+                                                      }`}
                                             </span>
                                             <span>Created {calendar.createdAt.toDate().toLocaleDateString()}</span>
                                         </div>
@@ -222,7 +226,8 @@ export default function ChooseCalendarPage() {
                                         <div className="mt-6 flex flex-wrap gap-2">
                                             <Link
                                                 to={`/calendars/${calendar.id}`}
-                                                className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-center font-bold text-white hover:bg-blue-700"
+                                                className="flex-1 rounded-xl px-4 py-2.5 text-center font-bold text-white shadow-sm transition hover:brightness-90"
+                                                style={{ backgroundColor: calendar.color ?? "#2563eb" }}
                                             >
                                                 Open calendar
                                             </Link>
@@ -235,13 +240,15 @@ export default function ChooseCalendarPage() {
                                                     >
                                                         Edit
                                                     </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCalendarToDelete(calendar)}
-                                                        className="rounded-xl border border-red-200 px-4 py-2.5 font-bold text-red-700 hover:bg-red-50"
-                                                    >
-                                                        Delete
-                                                    </button>
+                                                    {!calendar.isPersonal ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setCalendarToDelete(calendar)}
+                                                            className="rounded-xl border border-red-200 px-4 py-2.5 font-bold text-red-700 hover:bg-red-50"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    ) : null}
                                                 </>
                                             ) : null}
                                         </div>
@@ -298,17 +305,13 @@ export default function ChooseCalendarPage() {
                         <label htmlFor="calendar-color" className="block text-sm font-bold text-slate-700">
                             Calendar color
                         </label>
-                        <div className="mt-2 flex items-center gap-3">
-                            <input
-                                id="calendar-color"
-                                type="color"
-                                value={form.color}
-                                onChange={(event) => setForm((current) => ({ ...current, color: event.target.value }))}
-                                disabled={isSaving}
-                                className="h-11 w-16 cursor-pointer rounded-lg border border-slate-300 bg-white p-1"
-                            />
-                            <span className="text-sm text-slate-600">Used on calendar cards and event accents.</span>
-                        </div>
+                        <CalendarColorPicker
+                            id="calendar-color"
+                            value={form.color}
+                            onChange={(color) => setForm((current) => ({ ...current, color }))}
+                            disabled={isSaving}
+                        />
+                        <p className="mt-2 text-sm text-slate-600">Used on calendar cards and event accents.</p>
                     </div>
                     {errorMessage ? (
                         <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">

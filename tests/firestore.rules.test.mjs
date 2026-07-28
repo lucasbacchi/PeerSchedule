@@ -5,6 +5,7 @@ import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebas
 import {
     Timestamp,
     collection,
+    deleteDoc,
     arrayRemove,
     deleteField,
     doc,
@@ -39,6 +40,7 @@ const calendar = {
     color: "#2563eb",
     ownerId: "owner",
     memberIds: ["owner", "member"],
+    allowMembersToEditEvents: false,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
 };
@@ -82,6 +84,12 @@ beforeEach(async () => {
             setDoc(doc(database, "users", "admin"), user("Admin", "admin")),
             setDoc(doc(database, "groups", "calendar"), calendar),
             setDoc(doc(database, "events", "event"), event),
+            setDoc(doc(database, "events", "removable-member-event"), {
+                ...event,
+                creatorId: "member",
+                participants: { member: "accepted", owner: "accepted" },
+                participantIds: ["member", "owner"],
+            }),
             setDoc(doc(database, "eventDetails", "event"), {
                 title: event.title,
                 description: "",
@@ -90,6 +98,16 @@ beforeEach(async () => {
                 calendarId: "calendar",
                 visibility: "full_details",
                 viewerIds: ["owner", "member"],
+                updatedAt: Timestamp.now(),
+            }),
+            setDoc(doc(database, "eventDetails", "removable-member-event"), {
+                title: event.title,
+                description: "",
+                location: "",
+                creatorId: "member",
+                calendarId: "calendar",
+                visibility: "full_details",
+                viewerIds: ["member", "owner"],
                 updatedAt: Timestamp.now(),
             }),
         ]);
@@ -108,6 +126,36 @@ test("signed-out users cannot read calendars", async () => {
 test("members can read their shared calendar", async () => {
     const database = testEnvironment.authenticatedContext("member").firestore();
     await assertSucceeds(getDoc(doc(database, "groups", "calendar")));
+});
+
+test("legacy calendars without the member-edit field remain editable", async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const database = context.firestore();
+        const { allowMembersToEditEvents: _permission, ...legacyCalendar } = calendar;
+        await setDoc(doc(database, "groups", "legacy-calendar"), legacyCalendar);
+    });
+    const database = testEnvironment.authenticatedContext("owner").firestore();
+    await assertSucceeds(
+        updateDoc(doc(database, "groups", "legacy-calendar"), {
+            name: "Updated legacy calendar",
+            updatedAt: Timestamp.now(),
+        })
+    );
+});
+
+test("personal calendars are private, unshareable, and undeletable", async () => {
+    const database = testEnvironment.authenticatedContext("owner").firestore();
+    const reference = doc(database, "groups", "personal_owner");
+    await assertSucceeds(
+        setDoc(reference, {
+            ...calendar,
+            name: "Owner Personal Calendar",
+            memberIds: ["owner"],
+            isPersonal: true,
+        })
+    );
+    await assertFails(updateDoc(reference, { memberIds: ["owner", "member"], updatedAt: Timestamp.now() }));
+    await assertFails(deleteDoc(reference));
 });
 
 test("nonmembers cannot read a private calendar", async () => {
@@ -158,6 +206,54 @@ test("participants can update only their own RSVP", async () => {
     );
 });
 
+test("calendar owners can edit any event while members need the calendar permission", async () => {
+    const ownerDatabase = testEnvironment.authenticatedContext("owner").firestore();
+    const memberDatabase = testEnvironment.authenticatedContext("member").firestore();
+
+    await assertSucceeds(
+        updateDoc(doc(ownerDatabase, "events", "event"), {
+            title: "Owner edited meeting",
+            updatedAt: Timestamp.now(),
+        })
+    );
+    await assertFails(
+        updateDoc(doc(memberDatabase, "events", "event"), {
+            title: "Member edited meeting",
+            updatedAt: Timestamp.now(),
+        })
+    );
+
+    await assertSucceeds(
+        updateDoc(doc(ownerDatabase, "groups", "calendar"), {
+            allowMembersToEditEvents: true,
+            updatedAt: Timestamp.now(),
+        })
+    );
+    await assertSucceeds(
+        updateDoc(doc(memberDatabase, "events", "event"), {
+            title: "Member edited meeting",
+            updatedAt: Timestamp.now(),
+        })
+    );
+});
+
+test("calendar owners can take ownership of events when removing their creator", async () => {
+    const database = testEnvironment.authenticatedContext("owner").firestore();
+    const batch = writeBatch(database);
+    batch.update(doc(database, "events", "removable-member-event"), {
+        creatorId: "owner",
+        participants: { owner: "accepted" },
+        participantIds: ["owner"],
+        updatedAt: Timestamp.now(),
+    });
+    batch.update(doc(database, "eventDetails", "removable-member-event"), {
+        creatorId: "owner",
+        viewerIds: ["owner"],
+        updatedAt: Timestamp.now(),
+    });
+    await assertSucceeds(batch.commit());
+});
+
 test("participants can remove themselves from an event and its private details", async () => {
     const database = testEnvironment.authenticatedContext("member").firestore();
     const batch = writeBatch(database);
@@ -188,4 +284,24 @@ test("user directory searches must be constrained and limited", async () => {
         getDocs(query(collection(database, "users"), where("searchTokens", "array-contains", "example"), limit(20)))
     );
     await assertFails(getDocs(collection(database, "users")));
+});
+
+test("calendar members can share only their own daily availability", async () => {
+    const memberDatabase = testEnvironment.authenticatedContext("member").firestore();
+    await assertSucceeds(
+        setDoc(doc(memberDatabase, "availability", "calendar_member_2026-07-28"), {
+            calendarId: "calendar",
+            userId: "member",
+            date: "2026-07-28",
+            slots: { "0900": "available", "0930": "unavailable" },
+        })
+    );
+    await assertFails(
+        setDoc(doc(memberDatabase, "availability", "calendar_owner_2026-07-28"), {
+            calendarId: "calendar",
+            userId: "owner",
+            date: "2026-07-28",
+            slots: { "0900": "available" },
+        })
+    );
 });

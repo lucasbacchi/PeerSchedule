@@ -1,11 +1,13 @@
 import {
     Timestamp,
+    type Unsubscribe,
     collection,
     deleteDoc,
     doc,
     getDoc,
     getDocs,
     limit,
+    onSnapshot,
     query,
     runTransaction,
     setDoc,
@@ -49,6 +51,55 @@ export const getFriendRequests = async (
     return {
         incoming: incoming.sort(newestFirst),
         outgoing: outgoing.sort(newestFirst),
+    };
+};
+
+export const watchFriendRequests = (
+    uid: string,
+    onChange: (requests: { incoming: FriendRequest[]; outgoing: FriendRequest[] }) => void,
+    onError: (error: Error) => void
+): Unsubscribe => {
+    let incoming: FriendRequest[] = [];
+    let outgoing: FriendRequest[] = [];
+    let hasIncoming = false;
+    let hasOutgoing = false;
+    const newestFirst = (first: FriendRequest, second: FriendRequest): number =>
+        second.createdAt.toMillis() - first.createdAt.toMillis();
+    const emit = (): void => {
+        if (hasIncoming && hasOutgoing) {
+            onChange({
+                incoming: [...incoming].sort(newestFirst),
+                outgoing: [...outgoing].sort(newestFirst),
+            });
+        }
+    };
+    const requestsReference = collection(db, FRIEND_REQUESTS_COLLECTION);
+    const unsubscribeIncoming = onSnapshot(
+        query(requestsReference, where("receiverId", "==", uid)),
+        (snapshot) => {
+            incoming = snapshot.docs.map((requestDocument) =>
+                requestFromDocument(requestDocument.id, requestDocument.data())
+            );
+            hasIncoming = true;
+            emit();
+        },
+        onError
+    );
+    const unsubscribeOutgoing = onSnapshot(
+        query(requestsReference, where("senderId", "==", uid)),
+        (snapshot) => {
+            outgoing = snapshot.docs.map((requestDocument) =>
+                requestFromDocument(requestDocument.id, requestDocument.data())
+            );
+            hasOutgoing = true;
+            emit();
+        },
+        onError
+    );
+
+    return () => {
+        unsubscribeIncoming();
+        unsubscribeOutgoing();
     };
 };
 

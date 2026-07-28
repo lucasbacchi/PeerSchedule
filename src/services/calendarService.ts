@@ -9,6 +9,7 @@ import {
     getDoc,
     getDocs,
     query,
+    setDoc,
     updateDoc,
     where,
     writeBatch,
@@ -33,6 +34,7 @@ export interface UpdateCalendarInput {
     name?: string;
     description?: string;
     color?: string;
+    allowMembersToEditEvents?: boolean;
 }
 
 const calendarFromDocument = (id: string, data: Record<string, unknown>): Group => ({
@@ -42,6 +44,8 @@ const calendarFromDocument = (id: string, data: Record<string, unknown>): Group 
     color: typeof data.color === "string" ? data.color : "#2563eb",
     ownerId: typeof data.ownerId === "string" ? data.ownerId : "",
     memberIds: Array.isArray(data.memberIds) ? data.memberIds.filter((value) => typeof value === "string") : [],
+    allowMembersToEditEvents: data.allowMembersToEditEvents === true,
+    isPersonal: data.isPersonal === true,
     createdAt: data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.now(),
     updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt : undefined,
 });
@@ -81,6 +85,8 @@ export const createCalendar = async (input: CreateCalendarInput): Promise<Group>
         color,
         ownerId: input.ownerId,
         memberIds: [input.ownerId],
+        allowMembersToEditEvents: false,
+        isPersonal: false,
         createdAt: now,
         updatedAt: now,
     };
@@ -89,13 +95,40 @@ export const createCalendar = async (input: CreateCalendarInput): Promise<Group>
     return { id: documentReference.id, ...newCalendar };
 };
 
+export const ensurePersonalCalendar = async (uid: string, displayName?: string | null): Promise<Group> => {
+    const reference = doc(db, GROUPS_COLLECTION, `personal_${uid}`);
+    const snapshot = await getDoc(reference);
+    if (snapshot.exists()) return calendarFromDocument(snapshot.id, snapshot.data());
+
+    const now = Timestamp.now();
+    const trimmedDisplayName = displayName?.trim();
+    const calendarOwnerName = trimmedDisplayName && trimmedDisplayName.length > 0 ? trimmedDisplayName : "My";
+    const personalCalendar: Omit<Group, "id"> = {
+        name: `${calendarOwnerName} Personal Calendar`,
+        description: "Your private schedule used to block availability in shared calendars.",
+        color: "#4f46e5",
+        ownerId: uid,
+        memberIds: [uid],
+        allowMembersToEditEvents: false,
+        isPersonal: true,
+        createdAt: now,
+        updatedAt: now,
+    };
+    await setDoc(reference, personalCalendar);
+    return { id: reference.id, ...personalCalendar };
+};
+
 export const getCalendarById = async (calendarId: string): Promise<Group | null> => {
     const snapshot = await getDoc(doc(db, GROUPS_COLLECTION, calendarId));
     return snapshot.exists() ? calendarFromDocument(snapshot.id, snapshot.data()) : null;
 };
 
 export const updateCalendar = async (calendarId: string, input: UpdateCalendarInput): Promise<void> => {
-    const updateData: Record<string, unknown> = { updatedAt: Timestamp.now() };
+    const updateData: Record<string, unknown> = {
+        updatedAt: Timestamp.now(),
+        // Backfill calendars created before this permission was introduced.
+        allowMembersToEditEvents: input.allowMembersToEditEvents ?? false,
+    };
 
     if (input.name !== undefined) {
         updateData.name = validateCalendarName(input.name);
@@ -113,6 +146,8 @@ export const updateCalendar = async (calendarId: string, input: UpdateCalendarIn
 };
 
 export const addCalendarMember = async (calendarId: string, userId: string): Promise<void> => {
+    const calendar = await getCalendarById(calendarId);
+    if (calendar?.isPersonal) throw new Error("Personal calendars cannot have additional members.");
     await updateDoc(doc(db, GROUPS_COLLECTION, calendarId), {
         memberIds: arrayUnion(userId),
         updatedAt: Timestamp.now(),
@@ -139,15 +174,35 @@ export const removeCalendarMember = async (calendarId: string, userId: string): 
         const batch = writeBatch(db);
 
         for (const eventDocument of eventSnapshot.docs.slice(start, start + 225)) {
-            batch.update(eventDocument.ref, {
+            const eventData = eventDocument.data();
+            const memberCreatedEvent = eventData.creatorId === userId;
+            const eventUpdate: Record<string, unknown> = {
                 [`participants.${userId}`]: deleteField(),
                 participantIds: arrayRemove(userId),
                 updatedAt: Timestamp.now(),
-            });
-            batch.update(doc(db, EVENT_DETAILS_COLLECTION, eventDocument.id), {
+            };
+            const detailsUpdate: Record<string, unknown> = {
                 viewerIds: arrayRemove(userId),
                 updatedAt: Timestamp.now(),
-            });
+            };
+
+            // An event creator must remain an accepted participant. Preserve
+            // member-created events by transferring them to the calendar owner.
+            if (memberCreatedEvent) {
+                const participantIds = Array.isArray(eventData.participantIds)
+                    ? eventData.participantIds.filter(
+                          (participantId): participantId is string =>
+                              typeof participantId === "string" && participantId !== userId
+                      )
+                    : [];
+                eventUpdate.creatorId = calendar.ownerId;
+                eventUpdate[`participants.${calendar.ownerId}`] = "accepted";
+                eventUpdate.participantIds = [...new Set([...participantIds, calendar.ownerId])];
+                detailsUpdate.creatorId = calendar.ownerId;
+            }
+
+            batch.update(eventDocument.ref, eventUpdate);
+            batch.update(doc(db, EVENT_DETAILS_COLLECTION, eventDocument.id), detailsUpdate);
         }
 
         await batch.commit();
@@ -160,6 +215,8 @@ export const removeCalendarMember = async (calendarId: string, userId: string): 
 };
 
 export const deleteCalendar = async (calendarId: string): Promise<void> => {
+    const calendar = await getCalendarById(calendarId);
+    if (calendar?.isPersonal) throw new Error("Your personal calendar cannot be deleted.");
     const eventsQuery = query(collection(db, EVENTS_COLLECTION), where("calendarId", "==", calendarId));
     const eventSnapshot = await getDocs(eventsQuery);
 
