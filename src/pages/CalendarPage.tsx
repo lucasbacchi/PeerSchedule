@@ -10,14 +10,12 @@ import {
     type AvailabilityStatus,
     type DailyAvailability,
     setAvailabilitySlot,
-    setUnavailableSlots,
     watchDailyAvailability,
 } from "@/services/availabilityService";
 import {
     addCalendarMember,
     deleteCalendar,
     getCalendarById,
-    getUserCalendars,
     removeCalendarMember,
     updateCalendar,
 } from "@/services/calendarService";
@@ -263,8 +261,9 @@ export default function CalendarPage() {
     const [availabilityPaint, setAvailabilityPaint] = useState<AvailabilityStatus | null>("available");
     const [dailyAvailability, setDailyAvailability] = useState<DailyAvailability[]>([]);
     const [hoveredAvailabilitySlot, setHoveredAvailabilitySlot] = useState<string | null>(null);
+    const [availabilityTooltipPosition, setAvailabilityTooltipPosition] = useState({ left: 0, top: 0 });
     const [availabilityComparisonUserId, setAvailabilityComparisonUserId] = useState("everyone");
-    const isPaintingAvailability = useRef(false);
+    const availabilityDragBrush = useRef<{ status: AvailabilityStatus | null } | null>(null);
     const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
     const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
     const [isEventFormOpen, setIsEventFormOpen] = useState(false);
@@ -345,7 +344,7 @@ export default function CalendarPage() {
 
     useEffect(() => {
         const stopPainting = (): void => {
-            isPaintingAvailability.current = false;
+            availabilityDragBrush.current = null;
         };
         window.addEventListener("pointerup", stopPainting);
         return () => window.removeEventListener("pointerup", stopPainting);
@@ -409,44 +408,6 @@ export default function CalendarPage() {
         void setAvailabilitySlot(calendarId, user.uid, date, slot, status).catch((error: unknown) =>
             setErrorMessage(error instanceof Error ? error.message : "Unable to update availability.")
         );
-    };
-
-    const blockFromPersonalCalendar = (): void => {
-        if (!user || !calendarId || calendar?.isPersonal) return;
-        void (async () => {
-            try {
-                setIsSaving(true);
-                setErrorMessage(null);
-                const personalCalendar = (await getUserCalendars(user.uid)).find((item) => item.isPersonal);
-                if (!personalCalendar) throw new Error("Your personal calendar is not ready yet.");
-                const personalEvents = await getEventsByCalendarId(personalCalendar.id);
-                const date = toDateKey(displayMonth);
-                const blockedSlots = availabilitySlots
-                    .filter((slot) => {
-                        const hour = Number(slot.key.slice(0, 2));
-                        const minute = Number(slot.key.slice(2, 4));
-                        const slotStart = new Date(displayMonth);
-                        slotStart.setHours(hour, minute, 0, 0);
-                        const slotEnd = new Date(slotStart.getTime() + 30 * 60_000);
-                        return personalEvents.some(
-                            (event) =>
-                                event.startTime.toMillis() < slotEnd.getTime() &&
-                                event.endTime.toMillis() > slotStart.getTime()
-                        );
-                    })
-                    .map((slot) => slot.key);
-                await setUnavailableSlots(calendarId, user.uid, date, blockedSlots);
-                setSuccessMessage(
-                    blockedSlots.length
-                        ? `Blocked ${blockedSlots.length} time slots from your personal calendar.`
-                        : "No personal calendar events overlap this day."
-                );
-            } catch (error: unknown) {
-                setErrorMessage(error instanceof Error ? error.message : "Unable to import personal busy times.");
-            } finally {
-                setIsSaving(false);
-            }
-        })();
     };
 
     const monthDates = useMemo(() => buildMonthDates(displayMonth), [displayMonth]);
@@ -700,7 +661,10 @@ export default function CalendarPage() {
             try {
                 setIsSaving(true);
                 setErrorMessage(null);
-                await updateCalendar(calendar.id, settings);
+                await updateCalendar(calendar.id, {
+                    ...settings,
+                    allowMembersToEditEvents: calendar.isPersonal ? false : settings.allowMembersToEditEvents,
+                });
                 setSuccessMessage("Calendar settings updated.");
                 await loadCalendar();
             } catch (error: unknown) {
@@ -713,7 +677,7 @@ export default function CalendarPage() {
 
     const handleSearchMembers = (): void => {
         if (!user) return;
-        if (memberSearchText.trim().length < 2) {
+        if (memberSearchText.trim().length < 1) {
             setMemberSearchResults([]);
             return;
         }
@@ -905,7 +869,14 @@ export default function CalendarPage() {
                                         <button
                                             key={view}
                                             type="button"
-                                            onClick={() => setCalendarView(view)}
+                                            onClick={() => {
+                                                if (view === "day" && calendarView !== "day") {
+                                                    const today = new Date();
+                                                    today.setHours(0, 0, 0, 0);
+                                                    setDisplayMonth(today);
+                                                }
+                                                setCalendarView(view);
+                                            }}
                                             className={`rounded-md px-3 py-1.5 text-sm font-bold capitalize ${
                                                 calendarView === view
                                                     ? "bg-white text-blue-700 shadow-sm"
@@ -1091,50 +1062,18 @@ export default function CalendarPage() {
                                 </div>
                             </div>
                         ) : dayDisplayMode === "availability" ? (
-                            <div className="p-4">
-                                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                            <div className="p-4 pb-28 md:pb-4">
+                                <div className="mb-4">
                                     <div>
                                         <h3 className="font-black text-slate-900">Daily availability</h3>
                                         <p className="text-sm text-slate-500">
                                             Paint your availability, then compare with the group or one person.
                                         </p>
                                     </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {!calendar.isPersonal ? (
-                                            <button
-                                                type="button"
-                                                onClick={blockFromPersonalCalendar}
-                                                disabled={isSaving}
-                                                className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
-                                            >
-                                                {isSaving ? "Blocking..." : "Block from personal calendar"}
-                                            </button>
-                                        ) : null}
-                                        {(
-                                            [
-                                                ["available", "Available", "bg-emerald-600 text-white"],
-                                                ["unavailable", "Unavailable", "bg-red-600 text-white"],
-                                                [null, "Clear", "bg-slate-600 text-white"],
-                                            ] as const
-                                        ).map(([status, label, activeClass]) => (
-                                            <button
-                                                key={label}
-                                                type="button"
-                                                onClick={() => setAvailabilityPaint(status)}
-                                                className={`rounded-lg px-3 py-2 text-sm font-bold ${
-                                                    availabilityPaint === status
-                                                        ? activeClass
-                                                        : "border border-slate-300 bg-white text-slate-700"
-                                                }`}
-                                            >
-                                                {label}
-                                            </button>
-                                        ))}
-                                    </div>
                                 </div>
 
                                 {hoveredAvailability ? (
-                                    <div className="mb-4 grid gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm sm:grid-cols-3">
+                                    <div className="hidden">
                                         <p>
                                             <strong className="text-emerald-700">Available:</strong>{" "}
                                             {hoveredAvailability.available.join(", ") || "Nobody"}
@@ -1149,14 +1088,12 @@ export default function CalendarPage() {
                                         </p>
                                     </div>
                                 ) : (
-                                    <p className="mb-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
-                                        Hover over a time to see everyone’s overlap.
-                                    </p>
+                                    <p className="hidden">Hover over a time to see everyone’s overlap.</p>
                                 )}
 
-                                <div className="rounded-xl border border-slate-200">
+                                <div className="max-h-[70vh] overflow-y-auto overscroll-contain rounded-xl border border-slate-200">
                                     <div>
-                                        <div className="sticky top-16 z-20 grid grid-cols-[5rem_minmax(8rem,1fr)_minmax(10rem,1fr)] bg-slate-100 shadow-sm">
+                                        <div className="sticky top-0 z-20 grid grid-cols-[5rem_minmax(8rem,1fr)_minmax(10rem,1fr)] bg-slate-100 shadow-sm">
                                             <div className="border-r border-slate-200 p-2 text-xs font-bold text-slate-500">
                                                 Time
                                             </div>
@@ -1204,7 +1141,31 @@ export default function CalendarPage() {
                                                 <div
                                                     key={slot.key}
                                                     className="grid grid-cols-[5rem_minmax(8rem,1fr)_minmax(10rem,1fr)]"
-                                                    onMouseEnter={() => setHoveredAvailabilitySlot(slot.key)}
+                                                    onMouseEnter={(event) => {
+                                                        setHoveredAvailabilitySlot(slot.key);
+                                                        setAvailabilityTooltipPosition({
+                                                            left: Math.max(
+                                                                12,
+                                                                Math.min(event.clientX + 16, window.innerWidth - 300)
+                                                            ),
+                                                            top: Math.max(
+                                                                76,
+                                                                Math.min(event.clientY + 16, window.innerHeight - 190)
+                                                            ),
+                                                        });
+                                                    }}
+                                                    onMouseMove={(event) =>
+                                                        setAvailabilityTooltipPosition({
+                                                            left: Math.max(
+                                                                12,
+                                                                Math.min(event.clientX + 16, window.innerWidth - 300)
+                                                            ),
+                                                            top: Math.max(
+                                                                76,
+                                                                Math.min(event.clientY + 16, window.innerHeight - 190)
+                                                            ),
+                                                        })
+                                                    }
                                                     onMouseLeave={() => setHoveredAvailabilitySlot(null)}
                                                 >
                                                     <div className="border-r border-t border-slate-200 px-2 py-2 text-xs font-semibold text-slate-500">
@@ -1213,18 +1174,21 @@ export default function CalendarPage() {
                                                     <button
                                                         type="button"
                                                         onPointerDown={(event) => {
+                                                            if (event.button !== 0 && event.button !== 2) return;
                                                             event.preventDefault();
-                                                            isPaintingAvailability.current = true;
-                                                            paintAvailabilitySlot(slot.key);
+                                                            const status =
+                                                                event.button === 2 ? null : availabilityPaint;
+                                                            availabilityDragBrush.current = { status };
+                                                            paintAvailabilitySlot(slot.key, status);
                                                         }}
                                                         onPointerEnter={() => {
-                                                            if (isPaintingAvailability.current) {
-                                                                paintAvailabilitySlot(slot.key);
+                                                            const dragBrush = availabilityDragBrush.current;
+                                                            if (dragBrush) {
+                                                                paintAvailabilitySlot(slot.key, dragBrush.status);
                                                             }
                                                         }}
                                                         onContextMenu={(event) => {
                                                             event.preventDefault();
-                                                            paintAvailabilitySlot(slot.key, null);
                                                         }}
                                                         className={`min-h-9 border-r border-t border-slate-200 ${
                                                             ownStatus === "available"
@@ -1233,7 +1197,6 @@ export default function CalendarPage() {
                                                                   ? "bg-red-500/70"
                                                                   : "bg-white hover:bg-blue-100"
                                                         }`}
-                                                        title={`You: ${ownStatus ?? "No response"}. Right-click to clear.`}
                                                         aria-label={`${slot.label}, your availability: ${ownStatus ?? "No response"}`}
                                                     />
                                                     <div
@@ -1255,11 +1218,6 @@ export default function CalendarPage() {
                                                                               : `rgb(5 150 105 / ${Math.round(18 + availableRatio * 82)}%)`,
                                                                   }
                                                                 : undefined
-                                                        }
-                                                        title={
-                                                            availabilityComparisonUserId === "everyone"
-                                                                ? `${availableCount} of ${members.length} people available`
-                                                                : `${selectedMember?.displayName ?? "Selected member"}: ${selectedStatus ?? "No response"}`
                                                         }
                                                         aria-label={
                                                             availabilityComparisonUserId === "everyone"
@@ -1284,9 +1242,65 @@ export default function CalendarPage() {
                                         })}
                                     </div>
                                 </div>
+
+                                {hoveredAvailability && hoveredAvailabilitySlot ? (
+                                    <div
+                                        className="pointer-events-none fixed z-50 w-72 rounded-xl border border-blue-200 bg-white p-3 text-sm shadow-xl"
+                                        style={availabilityTooltipPosition}
+                                        role="tooltip"
+                                    >
+                                        <p className="mb-2 border-b border-slate-200 pb-2 font-black text-slate-900">
+                                            {availabilitySlots.find((slot) => slot.key === hoveredAvailabilitySlot)
+                                                ?.label ?? "Time slot"}
+                                        </p>
+                                        <p>
+                                            <strong className="text-emerald-700">Available:</strong>{" "}
+                                            {hoveredAvailability.available.join(", ") || "Nobody"}
+                                        </p>
+                                        <p className="mt-1">
+                                            <strong className="text-red-700">Unavailable:</strong>{" "}
+                                            {hoveredAvailability.unavailable.join(", ") || "Nobody"}
+                                        </p>
+                                        <p className="mt-1">
+                                            <strong className="text-slate-600">No response:</strong>{" "}
+                                            {hoveredAvailability.unanswered.join(", ") || "Nobody"}
+                                        </p>
+                                    </div>
+                                ) : null}
+
+                                <aside
+                                    className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur md:bottom-6 md:left-auto md:right-6 md:translate-x-0"
+                                    aria-label="Availability paint controls"
+                                >
+                                    <p className="mb-2 text-center text-xs font-black uppercase tracking-wide text-slate-500 md:text-left">
+                                        Paint availability
+                                    </p>
+                                    <div className="flex gap-2">
+                                        {(
+                                            [
+                                                ["available", "Available", "bg-emerald-600 text-white"],
+                                                ["unavailable", "Unavailable", "bg-red-600 text-white"],
+                                                [null, "Clear", "bg-slate-600 text-white"],
+                                            ] as const
+                                        ).map(([status, label, activeClass]) => (
+                                            <button
+                                                key={label}
+                                                type="button"
+                                                onClick={() => setAvailabilityPaint(status)}
+                                                className={`rounded-lg px-3 py-2 text-sm font-bold ${
+                                                    availabilityPaint === status
+                                                        ? activeClass
+                                                        : "border border-slate-300 bg-white text-slate-700"
+                                                }`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </aside>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-[4rem_minmax(0,1fr)]">
+                            <div className="grid max-h-[70vh] grid-cols-[4rem_minmax(0,1fr)] overflow-y-auto overscroll-contain">
                                 <div className="relative" style={{ height: DAY_GRID_HEIGHT }}>
                                     {hourLabels.map((label, hour) => (
                                         <span
@@ -1773,7 +1787,12 @@ export default function CalendarPage() {
                                             type="button"
                                             onClick={() => handleParticipantResponse(status)}
                                             disabled={isSaving}
-                                            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold capitalize text-slate-700 hover:bg-slate-50"
+                                            aria-pressed={selectedEvent.participants[user.uid] === status}
+                                            className={`rounded-lg border px-3 py-2 text-sm font-bold capitalize transition-colors ${
+                                                selectedEvent.participants[user.uid] === status
+                                                    ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                                    : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                                            }`}
                                         >
                                             {status}
                                         </button>
@@ -1880,26 +1899,30 @@ export default function CalendarPage() {
                                     disabled={isSaving}
                                 />
                             </div>
-                            <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
-                                <input
-                                    type="checkbox"
-                                    checked={settings.allowMembersToEditEvents}
-                                    onChange={(event) =>
-                                        setSettings((current) => ({
-                                            ...current,
-                                            allowMembersToEditEvents: event.target.checked,
-                                        }))
-                                    }
-                                    className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
-                                />
-                                <span>
-                                    <span className="block font-bold text-slate-900">Let members edit all events</span>
-                                    <span className="block text-sm text-slate-500">
-                                        When enabled, every calendar member can edit events created by other members.
-                                        Only the owner and event creator can delete them.
+                            {!calendar.isPersonal ? (
+                                <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings.allowMembersToEditEvents}
+                                        onChange={(event) =>
+                                            setSettings((current) => ({
+                                                ...current,
+                                                allowMembersToEditEvents: event.target.checked,
+                                            }))
+                                        }
+                                        className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                                    />
+                                    <span>
+                                        <span className="block font-bold text-slate-900">
+                                            Let members edit all events
+                                        </span>
+                                        <span className="block text-sm text-slate-500">
+                                            When enabled, every calendar member can edit events created by other
+                                            members. Only the owner and event creator can delete them.
+                                        </span>
                                     </span>
-                                </span>
-                            </label>
+                                </label>
+                            ) : null}
                             <button
                                 type="submit"
                                 disabled={isSaving}
@@ -1929,13 +1952,13 @@ export default function CalendarPage() {
                                                 handleSearchMembers();
                                             }
                                         }}
-                                        placeholder="Display name or part of an email"
+                                        placeholder="Case-sensitive display name fragment"
                                         className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5"
                                     />
                                     <button
                                         type="button"
                                         onClick={handleSearchMembers}
-                                        disabled={isSearchingMembers || memberSearchText.trim().length < 2}
+                                        disabled={isSearchingMembers || memberSearchText.trim().length < 1}
                                         className="rounded-xl border border-blue-200 px-4 py-2.5 font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
                                     >
                                         {isSearchingMembers ? "Searching..." : "Search"}

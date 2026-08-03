@@ -550,9 +550,13 @@ export const deleteEvent = async (eventId: string, scope: DeleteEventScope = "si
         eventIds = [...new Set([eventId, ...matchingEventIds])];
     }
 
-    for (let start = 0; start < eventIds.length; start += 225) {
+    // Each eventDetails delete checks its linked event and calendar in the
+    // security rules. Keep batches below Firestore's 20 document-access-call
+    // limit for atomic operations or larger recurring series are rejected.
+    const secureDeleteBatchSize = 8;
+    for (let start = 0; start < eventIds.length; start += secureDeleteBatchSize) {
         const batch = writeBatch(db);
-        for (const id of eventIds.slice(start, start + 225)) {
+        for (const id of eventIds.slice(start, start + secureDeleteBatchSize)) {
             batch.delete(doc(db, EVENT_DETAILS_COLLECTION, id));
             batch.delete(doc(db, EVENTS_COLLECTION, id));
         }

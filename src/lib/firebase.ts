@@ -1,6 +1,7 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { Timestamp, getFirestore, initializeFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
     apiKey: "AIzaSyD3CJRaq-8pA5NFiG3val_WXVQGogd_Zlk",
@@ -24,6 +25,7 @@ export const db = existingApp
       });
 
 export const auth = getAuth(app);
+export const functions = getFunctions(app);
 
 export const dateToTimestamp = (date: Date | number | string): Timestamp => {
     const normalizedDate = date instanceof Date ? date : new Date(date);

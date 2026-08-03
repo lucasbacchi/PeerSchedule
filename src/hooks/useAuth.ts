@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 
 import { auth } from "@/lib/firebase";
 import { ensurePersonalCalendar } from "@/services/calendarService";
+import { ensureUserSearchTokens } from "@/services/userService";
 
 interface AuthState {
     user: FirebaseUser | null;
@@ -13,13 +14,22 @@ interface AuthState {
 
 export function useAuth(): AuthState {
     const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
-    const [isLoading, setIsLoading] = useState(auth.currentUser === null);
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         return onAuthStateChanged(auth, (nextUser) => {
-            setUser(nextUser);
-            setIsLoading(false);
-            if (nextUser) void ensurePersonalCalendar(nextUser.uid, nextUser.displayName);
+            void (async () => {
+                try {
+                    if (nextUser) {
+                        await Promise.all([ensurePersonalCalendar(nextUser.uid), ensureUserSearchTokens(nextUser.uid)]);
+                    }
+                } catch (error: unknown) {
+                    console.error("Unable to provision personal calendar:", error);
+                } finally {
+                    setUser(nextUser);
+                    setIsLoading(false);
+                }
+            })();
         });
     }, []);
 
@@ -35,6 +45,16 @@ export function useRequireAuth(): AuthState {
             void navigate("/", { replace: true });
         }
     }, [authState.isLoading, authState.user, navigate]);
+
+    useEffect(() => {
+        const protectRestoredPage = (event: PageTransitionEvent): void => {
+            if (event.persisted && !auth.currentUser) {
+                void navigate("/", { replace: true });
+            }
+        };
+        window.addEventListener("pageshow", protectRestoredPage);
+        return () => window.removeEventListener("pageshow", protectRestoredPage);
+    }, [navigate]);
 
     return authState;
 }

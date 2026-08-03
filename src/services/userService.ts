@@ -15,19 +15,15 @@ import {
 } from "firebase/firestore";
 
 const USERS_COLLECTION = "users";
-const MAX_SEARCH_TOKEN_LENGTH = 30;
 
-export const buildUserSearchTokens = (displayName: string, email: string): string[] => {
-    const values = [displayName.trim().toLowerCase(), email.trim().toLowerCase()];
+export const buildUserSearchTokens = (displayName: string): string[] => {
+    const normalizedName = displayName.trim();
     const tokens = new Set<string>();
 
-    for (const value of values) {
-        for (let start = 0; start < value.length; start += 1) {
-            for (let length = 2; length <= Math.min(MAX_SEARCH_TOKEN_LENGTH, value.length - start); length += 1) {
-                tokens.add(value.slice(start, start + length));
-            }
+    for (let start = 0; start < normalizedName.length; start += 1) {
+        for (let end = start + 1; end <= normalizedName.length; end += 1) {
+            tokens.add(normalizedName.slice(start, end));
         }
-        if (value.length > MAX_SEARCH_TOKEN_LENGTH) tokens.add(value);
     }
 
     return [...tokens];
@@ -85,9 +81,9 @@ export const getUserByEmail = async (email: string): Promise<User | null> => {
 };
 
 export const searchUsers = async (searchText: string, currentUserId: string): Promise<User[]> => {
-    const normalizedSearch = searchText.trim().toLowerCase();
+    const normalizedSearch = searchText.trim();
 
-    if (normalizedSearch.length < 2) {
+    if (normalizedSearch.length < 1) {
         return [];
     }
 
@@ -110,7 +106,7 @@ export const createUser = async (user: User): Promise<string> => {
     await setDoc(userReference, {
         ...user,
         email: user.email.trim().toLowerCase(),
-        searchTokens: buildUserSearchTokens(user.displayName, user.email),
+        searchTokens: buildUserSearchTokens(user.displayName),
     });
 
     return user.uid;
@@ -120,6 +116,20 @@ export const updateUser = async (userId: string, updatedData: Partial<User>): Pr
     const userReference = doc(db, USERS_COLLECTION, userId);
 
     await updateDoc(userReference, updatedData);
+};
+
+export const ensureUserSearchTokens = async (userId: string): Promise<void> => {
+    const user = await getUserById(userId);
+    if (!user) return;
+
+    const expectedTokens = buildUserSearchTokens(user.displayName);
+    const tokensMatch =
+        user.searchTokens?.length === expectedTokens.length &&
+        expectedTokens.every((token, index) => user.searchTokens?.[index] === token);
+
+    if (!tokensMatch) {
+        await updateUser(userId, { searchTokens: expectedTokens });
+    }
 };
 
 export const getUsersByFriendId = async (friendId: string): Promise<User[]> => {

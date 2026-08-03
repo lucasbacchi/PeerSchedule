@@ -1,6 +1,7 @@
 import { type SubmitEventHandler, useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
+import Modal from "@/components/common/Modal";
 import PageState from "@/components/common/PageState";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { getFriends } from "@/services/friendService";
@@ -17,6 +18,8 @@ export default function AccountPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+    const [deleteConfirmation, setDeleteConfirmation] = useState("");
 
     const loadProfile = useCallback(async (): Promise<void> => {
         if (!user) return;
@@ -67,6 +70,24 @@ export default function AccountPage() {
                 await navigate("/", { replace: true });
             } catch (error: unknown) {
                 setErrorMessage(error instanceof Error ? error.message : "Unable to sign out.");
+            } finally {
+                setIsSaving(false);
+            }
+        })();
+    };
+
+    const handleDeleteAccount = (): void => {
+        if (deleteConfirmation !== "DELETE") return;
+        void (async () => {
+            try {
+                setIsSaving(true);
+                setErrorMessage(null);
+                const { deleteSignedInAccount } = await import("@/services/authService");
+                await deleteSignedInAccount();
+                window.location.replace("/");
+            } catch (error: unknown) {
+                setErrorMessage(error instanceof Error ? error.message : "Unable to delete your account.");
+                setIsDeleteConfirmOpen(false);
             } finally {
                 setIsSaving(false);
             }
@@ -190,20 +211,82 @@ export default function AccountPage() {
                         </section>
 
                         <section className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
-                            <h2 className="text-xl font-black text-slate-950">Session</h2>
+                            <h2 className="text-xl font-black text-slate-950">Account actions</h2>
                             <p className="mt-2 text-sm text-slate-600">Sign out of PeerSchedule on this browser.</p>
-                            <button
-                                type="button"
-                                onClick={handleSignOut}
-                                disabled={isSaving}
-                                className="mt-5 rounded-xl bg-red-600 px-5 py-2.5 font-bold text-white hover:bg-red-700 disabled:opacity-50"
-                            >
-                                Sign out
-                            </button>
+                            <div className="mt-5 flex flex-wrap gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleSignOut}
+                                    disabled={isSaving}
+                                    className="rounded-xl border border-slate-300 px-5 py-2.5 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                >
+                                    Sign out
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setDeleteConfirmation("");
+                                        setIsDeleteConfirmOpen(true);
+                                    }}
+                                    disabled={isSaving}
+                                    className="rounded-xl bg-red-600 px-5 py-2.5 font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                                >
+                                    Delete account
+                                </button>
+                            </div>
                         </section>
                     </section>
                 </div>
             </div>
+
+            <Modal
+                title="Permanently delete account?"
+                isOpen={isDeleteConfirmOpen}
+                onClose={() => setIsDeleteConfirmOpen(false)}
+                closeDisabled={isSaving}
+            >
+                <div className="space-y-4">
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                        This permanently deletes your profile, personal calendar, events you created, availability, and
+                        friend requests. Shared calendars you own and their contents will also be deleted. This cannot
+                        be undone.
+                    </div>
+                    <div>
+                        <label htmlFor="delete-account-confirmation" className="block text-sm font-bold text-slate-700">
+                            Type DELETE to confirm
+                        </label>
+                        <input
+                            id="delete-account-confirmation"
+                            value={deleteConfirmation}
+                            onChange={(event) => setDeleteConfirmation(event.target.value)}
+                            disabled={isSaving}
+                            autoComplete="off"
+                            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-100"
+                        />
+                    </div>
+                    <p className="text-sm text-slate-600">
+                        Google will ask you to sign in again before deletion is allowed.
+                    </p>
+                    <div className="flex justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setIsDeleteConfirmOpen(false)}
+                            disabled={isSaving}
+                            className="rounded-xl border border-slate-300 px-4 py-2.5 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleDeleteAccount}
+                            disabled={isSaving || deleteConfirmation !== "DELETE"}
+                            className="rounded-xl bg-red-600 px-4 py-2.5 font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {isSaving ? "Deleting..." : "Permanently delete account"}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </main>
     );
 }

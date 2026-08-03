@@ -5,7 +5,13 @@ import Modal from "@/components/common/Modal";
 import PageState from "@/components/common/PageState";
 import CalendarColorPicker from "@/components/common/CalendarColorPicker";
 import { useRequireAuth } from "@/hooks/useAuth";
-import { createCalendar, deleteCalendar, getUserCalendars, updateCalendar } from "@/services/calendarService";
+import {
+    createCalendar,
+    deleteCalendar,
+    ensurePersonalCalendar,
+    getUserCalendars,
+    updateCalendar,
+} from "@/services/calendarService";
 import type { Group } from "@/types/database";
 
 interface CalendarFormState {
@@ -38,6 +44,7 @@ export default function ChooseCalendarPage() {
         try {
             setIsLoading(true);
             setErrorMessage(null);
+            await ensurePersonalCalendar(user.uid);
             setCalendars(await getUserCalendars(user.uid));
         } catch (error: unknown) {
             console.error("Failed to load calendars:", error);

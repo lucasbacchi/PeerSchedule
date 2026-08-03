@@ -28,7 +28,7 @@ const user = (uid, role = "user") => ({
     displayNameLower: uid.toLowerCase(),
     email: `${uid.toLowerCase()}@example.com`,
     emailLower: `${uid.toLowerCase()}@example.com`,
-    searchTokens: [uid.toLowerCase(), "example"],
+    searchTokens: [uid.toLowerCase()],
     role,
     friendIds: [],
     createdAt: Timestamp.now(),
@@ -254,6 +254,45 @@ test("calendar owners can take ownership of events when removing their creator",
     await assertSucceeds(batch.commit());
 });
 
+test("calendar owners can delete recurring event and detail batches", async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+        const database = context.firestore();
+        const writes = [];
+        for (let index = 0; index < 8; index += 1) {
+            const eventId = `recurring-${index}`;
+            writes.push(
+                setDoc(doc(database, "events", eventId), {
+                    ...event,
+                    isRecurring: true,
+                    recurrenceRule: "FREQ=DAILY",
+                    recurrenceUntil: Timestamp.fromMillis(4_000_000),
+                    recurrenceSeriesId: "series",
+                }),
+                setDoc(doc(database, "eventDetails", eventId), {
+                    title: event.title,
+                    description: "",
+                    location: "",
+                    creatorId: "owner",
+                    calendarId: "calendar",
+                    visibility: "full_details",
+                    viewerIds: ["owner", "member"],
+                    updatedAt: Timestamp.now(),
+                })
+            );
+        }
+        await Promise.all(writes);
+    });
+
+    const database = testEnvironment.authenticatedContext("owner").firestore();
+    const batch = writeBatch(database);
+    for (let index = 0; index < 8; index += 1) {
+        const eventId = `recurring-${index}`;
+        batch.delete(doc(database, "eventDetails", eventId));
+        batch.delete(doc(database, "events", eventId));
+    }
+    await assertSucceeds(batch.commit());
+});
+
 test("participants can remove themselves from an event and its private details", async () => {
     const database = testEnvironment.authenticatedContext("member").firestore();
     const batch = writeBatch(database);
@@ -281,7 +320,7 @@ test("normal users cannot perform admin reads", async () => {
 test("user directory searches must be constrained and limited", async () => {
     const database = testEnvironment.authenticatedContext("member").firestore();
     await assertSucceeds(
-        getDocs(query(collection(database, "users"), where("searchTokens", "array-contains", "example"), limit(20)))
+        getDocs(query(collection(database, "users"), where("searchTokens", "array-contains", "member"), limit(20)))
     );
     await assertFails(getDocs(collection(database, "users")));
 });

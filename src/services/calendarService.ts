@@ -95,16 +95,32 @@ export const createCalendar = async (input: CreateCalendarInput): Promise<Group>
     return { id: documentReference.id, ...newCalendar };
 };
 
-export const ensurePersonalCalendar = async (uid: string, displayName?: string | null): Promise<Group> => {
-    const reference = doc(db, GROUPS_COLLECTION, `personal_${uid}`);
-    const snapshot = await getDoc(reference);
-    if (snapshot.exists()) return calendarFromDocument(snapshot.id, snapshot.data());
+export const ensurePersonalCalendar = async (uid: string): Promise<Group> => {
+    const personalCalendarId = `personal_${uid}`;
+    const reference = doc(db, GROUPS_COLLECTION, personalCalendarId);
+
+    // A direct get of a nonexistent protected document is denied by the
+    // membership-based read rule. Query calendars the user can read instead,
+    // then create the deterministic personal document when it is absent.
+    const readableCalendars = await getDocs(
+        query(collection(db, GROUPS_COLLECTION), where("memberIds", "array-contains", uid))
+    );
+    const existingPersonalCalendar = readableCalendars.docs.find(
+        (calendarDocument) => calendarDocument.id === personalCalendarId || calendarDocument.data().isPersonal === true
+    );
+    if (existingPersonalCalendar) {
+        const existingCalendar = calendarFromDocument(existingPersonalCalendar.id, existingPersonalCalendar.data());
+        if (existingCalendar.name !== "Personal Calendar") {
+            const updatedAt = Timestamp.now();
+            await updateDoc(existingPersonalCalendar.ref, { name: "Personal Calendar", updatedAt });
+            return { ...existingCalendar, name: "Personal Calendar", updatedAt };
+        }
+        return existingCalendar;
+    }
 
     const now = Timestamp.now();
-    const trimmedDisplayName = displayName?.trim();
-    const calendarOwnerName = trimmedDisplayName && trimmedDisplayName.length > 0 ? trimmedDisplayName : "My";
     const personalCalendar: Omit<Group, "id"> = {
-        name: `${calendarOwnerName} Personal Calendar`,
+        name: "Personal Calendar",
         description: "Your private schedule used to block availability in shared calendars.",
         color: "#4f46e5",
         ownerId: uid,

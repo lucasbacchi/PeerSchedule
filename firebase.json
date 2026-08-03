@@ -17,6 +17,16 @@
     "hosting": {
         "public": "public/client",
         "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+        "headers": [
+            {
+                "source": "!/@(assets|img)/**",
+                "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+            },
+            {
+                "source": "/assets/manifest-*.js",
+                "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+            }
+        ],
         "rewrites": [
             {
                 "source": "**",

@@ -113,7 +113,7 @@ export default function FriendsPage() {
                 setErrorMessage(null);
                 const results = await searchUsers(searchText, user.uid);
                 setSearchResults(results);
-                if (results.length === 0) setMessage("No users matched that display name or email fragment.");
+                if (results.length === 0) setMessage("No users matched that case-sensitive display name fragment.");
             } catch (error: unknown) {
                 setErrorMessage(error instanceof Error ? error.message : "Unable to search for users.");
             } finally {
@@ -184,7 +184,7 @@ export default function FriendsPage() {
                 <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="text-xl font-black text-slate-950">Find a PeerSchedule user</h2>
                     <p className="mt-1 text-sm text-slate-500">
-                        Search by at least two characters from a display name or email address.
+                        Search for any case-sensitive part of a user&apos;s display name.
                     </p>
                     <form onSubmit={handleSearch} className="mt-5 flex flex-col gap-3 sm:flex-row">
                         <label htmlFor="friend-search" className="sr-only">
@@ -194,14 +194,14 @@ export default function FriendsPage() {
                             id="friend-search"
                             value={searchText}
                             onChange={(event) => setSearchText(event.target.value)}
-                            minLength={2}
+                            minLength={1}
                             required
-                            placeholder="Name or part of an email"
+                            placeholder="Case-sensitive display name fragment"
                             className="flex-1 rounded-xl border border-slate-300 px-4 py-3 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                         />
                         <button
                             type="submit"
-                            disabled={isWorking || searchText.trim().length < 2}
+                            disabled={isWorking || searchText.trim().length < 1}
                             className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
                         >
                             {isWorking ? "Searching..." : "Search"}

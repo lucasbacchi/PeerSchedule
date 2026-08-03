@@ -1,8 +1,10 @@
 import type { User as FirebaseUser } from "firebase/auth";
-import { GoogleAuthProvider, signInWithPopup, updateProfile } from "firebase/auth";
+import { GoogleAuthProvider, reauthenticateWithPopup, signInWithPopup, updateProfile } from "firebase/auth";
 import { Timestamp } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 
-import { auth } from "@/lib/firebase";
+import { auth, functions } from "@/lib/firebase";
+import { ensurePersonalCalendar } from "./calendarService";
 import { buildUserSearchTokens, createUser, getUserById, updateUser } from "./userService";
 
 const normalizeGoogleName = (displayName: string | null | undefined, email: string | null | undefined): string => {
@@ -29,7 +31,7 @@ const buildCachedProfile = (firebaseUser: FirebaseUser) => {
         email,
         emailLower: email.toLowerCase(),
         photoURL: firebaseUser.photoURL ?? undefined,
-        searchTokens: buildUserSearchTokens(displayName, email),
+        searchTokens: buildUserSearchTokens(displayName),
     };
 };
 
@@ -52,16 +54,23 @@ export const signInWithGoogle = async (): Promise<FirebaseUser> => {
             updatedAt: Timestamp.now(),
         });
     } else {
+        const searchTokensMatch =
+            existingUser.searchTokens?.length === cachedProfile.searchTokens.length &&
+            cachedProfile.searchTokens.every((token, index) => existingUser.searchTokens?.[index] === token);
         const hasChanges =
             existingUser.displayName !== cachedProfile.displayName ||
             existingUser.email !== cachedProfile.email ||
             existingUser.photoURL !== cachedProfile.photoURL ||
-            !existingUser.searchTokens;
+            !searchTokensMatch;
 
         if (hasChanges) {
             await updateUser(firebaseUser.uid, cachedProfile);
         }
     }
+
+    // Provision immediately for new accounts and repair older accounts that
+    // authenticated before personal calendars were introduced.
+    await ensurePersonalCalendar(firebaseUser.uid);
 
     return firebaseUser;
 };
@@ -82,10 +91,62 @@ export const updateSignedInUserProfile = async (displayName: string): Promise<vo
     await updateUser(currentUser.uid, {
         displayName: trimmedName,
         displayNameLower: trimmedName.toLowerCase(),
-        searchTokens: buildUserSearchTokens(trimmedName, currentUser.email ?? ""),
+        searchTokens: buildUserSearchTokens(trimmedName),
     });
 };
 
 export const signOut = async (): Promise<void> => {
     await auth.signOut();
+};
+
+const clearDeletedAccountClientState = async (): Promise<void> => {
+    try {
+        await auth.signOut();
+    } catch (error: unknown) {
+        // The backend has already deleted the Auth user, so an invalid-token
+        // sign-out response must not prevent local cleanup or redirection.
+        console.warn("Firebase session was already invalidated:", error);
+    }
+
+    if (typeof window === "undefined") return;
+
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+        try {
+            const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
+                (key): key is string => key !== null
+            );
+            for (const key of keys) {
+                const normalizedKey = key.toLowerCase();
+                if (normalizedKey.includes("firebase") || normalizedKey.includes("peerschedule")) {
+                    storage.removeItem(key);
+                }
+            }
+        } catch (error: unknown) {
+            console.warn("Unable to clear browser storage:", error);
+        }
+    }
+
+    if ("caches" in window) {
+        try {
+            await Promise.all((await window.caches.keys()).map((cacheName) => window.caches.delete(cacheName)));
+        } catch (error: unknown) {
+            console.warn("Unable to clear browser cache storage:", error);
+        }
+    }
+};
+
+export const deleteSignedInAccount = async (): Promise<void> => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+        throw new Error("You must be signed in to delete your account.");
+    }
+
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    await reauthenticateWithPopup(currentUser, provider);
+    await currentUser.getIdToken(true);
+
+    const deleteAccount = httpsCallable<void, { success: boolean }>(functions, "deleteAccount");
+    await deleteAccount();
+    await clearDeletedAccountClientState();
 };
