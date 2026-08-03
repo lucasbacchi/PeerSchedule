@@ -4,7 +4,7 @@ import { NavLink, useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { watchFriendRequests } from "@/services/friendService";
 import type { User } from "@/types/database";
-import logo from "../public/img/TempLogo.png";
+import logo from "../public/img/logo.png";
 
 const linkClasses = ({ isActive }: { isActive: boolean }): string =>
     `rounded-lg px-3 py-2 text-sm font-semibold transition ${
