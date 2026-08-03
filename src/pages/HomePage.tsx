@@ -38,7 +38,7 @@ export default function HomePage() {
 
     return (
         <main className="bg-gradient-to-b from-blue-50 via-white to-slate-50">
-            <title>Home | PeerSchedule</title>
+            <title>PeerSchedule</title>
             <section className="mx-auto grid min-h-[calc(100dvh-4rem)] max-w-7xl items-center gap-12 px-4 py-12 lg:grid-cols-2 lg:px-8">
                 <div>
                     <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">

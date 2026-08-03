@@ -256,6 +256,7 @@ export default function CalendarPage() {
         const now = new Date();
         return new Date(now.getFullYear(), now.getMonth(), 1);
     });
+    const [selectedDate, setSelectedDate] = useState(() => new Date());
     const [calendarView, setCalendarView] = useState<CalendarView>("month");
     const [dayDisplayMode, setDayDisplayMode] = useState<"events" | "availability">("events");
     const [availabilityPaint, setAvailabilityPaint] = useState<AvailabilityStatus | null>("available");
@@ -448,6 +449,7 @@ export default function CalendarPage() {
             if (calendarView === "day") next.setDate(next.getDate() + direction);
             if (calendarView === "week") next.setDate(next.getDate() + direction * 7);
             if (calendarView === "month") next.setMonth(next.getMonth() + direction);
+            if (calendarView !== "month") setSelectedDate(next);
             return next;
         });
     };
@@ -776,7 +778,7 @@ export default function CalendarPage() {
 
     return (
         <main className="min-h-[calc(100dvh-4rem)] bg-slate-50">
-            <title>{calendar.name} | PeerSchedule</title>
+            <title>PeerSchedule</title>
             <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex items-start gap-4">
@@ -841,11 +843,12 @@ export default function CalendarPage() {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        const now = new Date();
-                                        setDisplayMonth(
-                                            calendarView === "month"
-                                                ? new Date(now.getFullYear(), now.getMonth(), 1)
+                                     onClick={() => {
+                                         const now = new Date();
+                                         setSelectedDate(now);
+                                         setDisplayMonth(
+                                             calendarView === "month"
+                                                 ? new Date(now.getFullYear(), now.getMonth(), 1)
                                                 : now
                                         );
                                     }}
@@ -868,14 +871,12 @@ export default function CalendarPage() {
                                     {(["day", "week", "month"] as const).map((view) => (
                                         <button
                                             key={view}
-                                            type="button"
-                                            onClick={() => {
-                                                if (view === "day" && calendarView !== "day") {
-                                                    const today = new Date();
-                                                    today.setHours(0, 0, 0, 0);
-                                                    setDisplayMonth(today);
-                                                }
-                                                setCalendarView(view);
+                                             type="button"
+                                             onClick={() => {
+                                                 if (view !== "month" && calendarView === "month") {
+                                                     setDisplayMonth(selectedDate);
+                                                 }
+                                                 setCalendarView(view);
                                             }}
                                             className={`rounded-md px-3 py-1.5 text-sm font-bold capitalize ${
                                                 calendarView === view
@@ -929,11 +930,12 @@ export default function CalendarPage() {
                                                 className={`relative min-h-28 border-b border-r border-slate-200 p-2 sm:min-h-36 ${isCurrentMonth ? "bg-white" : "bg-slate-50 text-slate-400"}`}
                                             >
                                                 <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setDisplayMonth(date);
-                                                        setCalendarView("day");
-                                                    }}
+                                                     type="button"
+                                                     onClick={() => {
+                                                         setDisplayMonth(date);
+                                                         setSelectedDate(date);
+                                                         setCalendarView("day");
+                                                     }}
                                                     className="absolute inset-0 hover:bg-blue-50"
                                                     aria-label={`View ${date.toLocaleDateString()}`}
                                                 />
@@ -979,11 +981,12 @@ export default function CalendarPage() {
                                             return (
                                                 <button
                                                     key={toDateKey(date)}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setDisplayMonth(date);
-                                                        setCalendarView("day");
-                                                    }}
+                                                     type="button"
+                                                     onClick={() => {
+                                                         setDisplayMonth(date);
+                                                         setSelectedDate(date);
+                                                         setCalendarView("day");
+                                                     }}
                                                     className={`border-l border-slate-200 p-3 text-center hover:bg-blue-50 ${
                                                         isToday
                                                             ? "bg-blue-50 text-blue-700"

@@ -3,7 +3,7 @@ import { Link } from "react-router";
 export default function CatchAll() {
     return (
         <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-slate-50 px-4 py-12">
-            <title>Page Not Found | PeerSchedule</title>
+            <title>PeerSchedule</title>
             <section className="max-w-lg rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
                 <p className="text-sm font-bold uppercase tracking-wide text-blue-600">404 error</p>
                 <h1 className="mt-2 text-3xl font-black text-slate-950">Page not found</h1>

@@ -157,7 +157,7 @@ export default function FriendsPage() {
 
     return (
         <main className="min-h-[calc(100dvh-4rem)] bg-slate-50">
-            <title>Friends | PeerSchedule</title>
+            <title>PeerSchedule</title>
             <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
                 <div>
                     <p className="text-sm font-bold uppercase tracking-wide text-blue-600">Peer connections</p>

@@ -141,7 +141,7 @@ export default function ChooseCalendarPage() {
 
     return (
         <main className="min-h-[calc(100dvh-4rem)] bg-slate-50">
-            <title>Choose Calendar | PeerSchedule</title>
+            <title>PeerSchedule</title>
             <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
                 <section className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
                     <div>
