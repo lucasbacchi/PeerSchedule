@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 
 import { useAuth } from "@/hooks/useAuth";
-import logo from "../public/img/TempLogo.png";
+import logo from "../public/img/logo.png";
 
 export default function HomePage() {
     const navigate = useNavigate();
